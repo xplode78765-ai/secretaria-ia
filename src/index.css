@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--canvas);
+  --color-foreground: var(--ink-900);
+  --color-card: var(--canvas);
+  --color-card-foreground: var(--ink-900);
+  --color-popover: var(--canvas);
+  --color-popover-foreground: var(--ink-900);
+
+  --color-primary: var(--gold);
+  --color-primary-foreground: var(--ink-900);
+  --color-secondary: var(--ink-100);
+  --color-secondary-foreground: var(--ink-900);
+  --color-muted: var(--canvas-muted);
+  --color-muted-foreground: var(--ink-500);
+  --color-accent: var(--gold-50);
+  --color-accent-foreground: var(--ink-900);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--canvas);
+  --color-border: var(--ink-200);
+  --color-input: var(--ink-200);
+  --color-ring: var(--gold);
+
+  --color-sidebar: var(--canvas);
+  --color-sidebar-foreground: var(--ink-900);
+  --color-sidebar-primary: var(--gold);
+  --color-sidebar-primary-foreground: var(--ink-900);
+  --color-sidebar-accent: var(--gold-50);
+  --color-sidebar-accent-foreground: var(--ink-900);
+  --color-sidebar-border: var(--ink-200);
+  --color-sidebar-ring: var(--gold);
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+}
+
+:root {
+  --radius: 0.5rem;
+
+  /* Ink scale */
+  --ink-900: #111111;
+  --ink-800: #2A2A2A;
+  --ink-700: #3D3D3D;
+  --ink-600: #666666;
+  --ink-500: #888888;
+  --ink-400: #A0A0A0;
+  --ink-300: #C7C7C7;
+  --ink-200: #E8E8E8;
+  --ink-100: #F0F0F0;
+  --ink-50: #F7F7F5;
+
+  /* Canvas scale */
+  --canvas: #FFFFFF;
+  --canvas-subtle: #FAFAFA;
+  --canvas-muted: #F7F7F5;
+
+  /* Gold scale */
+  --gold: #D4AF37;
+  --gold-50: #FBF7E9;
+  --gold-100: #F7EFD4;
+  --gold-200: #E4C982;
+  --gold-300: #D4AF37;
+  --gold-400: #C5A059;
+  --gold-500: #B8924A;
+  --gold-600: #9A7A3E;
+  --gold-700: #7C6230;
+
+  /* Status colors */
+  --success: #16A34A;
+  --success-50: #F0FDF4;
+  --success-100: #DCFCE7;
+  --success-600: #16A34A;
+  --success-700: #15803D;
+
+  --warning: #D97706;
+  --warning-50: #FFFBEB;
+  --warning-100: #FEF3C7;
+  --warning-600: #D97706;
+  --warning-700: #B45309;
+
+  --danger: #DC2626;
+  --danger-50: #FEF2F2;
+  --danger-100: #FEE2E2;
+  --danger-600: #DC2626;
+  --danger-700: #B91C1C;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1, h2, h3, h4, .font-serif {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+  }
+}
+
+/* Gold gradient utilities */
+.gold-gradient {
+  background: linear-gradient(135deg, #E4C982 0%, #D4AF37 50%, #C5A059 100%);
+}
+
+.gold-gradient-text {
+  background: linear-gradient(135deg, #E4C982 0%, #D4AF37 50%, #C5A059 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gold-border {
+  border: 1px solid #E4C982;
+}
+
+.gold-shadow {
+  box-shadow: 0 2px 12px rgba(212, 175, 55, 0.15), 0 1px 3px rgba(212, 175, 55, 0.1);
+}
+
+.luxury-card {
+  background: #FFFFFF;
+  border: 1px solid #E8E8E8;
+  box-shadow: 0 1px 3px rgba(17, 17, 17, 0.04), 0 4px 12px rgba(17, 17, 17, 0.03);
+  border-radius: var(--radius-lg);
+}
+
+.luxury-card:hover {
+  box-shadow: 0 4px 16px rgba(212, 175, 55, 0.08), 0 1px 3px rgba(17, 17, 17, 0.06);
+  border-color: #E4C982;
+  transition: all 0.2s ease;
+}
+
+.btn-gold {
+  background: linear-gradient(135deg, #E4C982 0%, #D4AF37 50%, #C5A059 100%);
+  color: #111111;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.btn-gold:hover {
+  background: linear-gradient(135deg, #E4C982 0%, #D4AF37 60%, #C5A059 100%);
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+  transform: translateY(-1px);
+}
+
+/* Chat bubble styles */
+.chat-user {
+  background: linear-gradient(135deg, #E4C982, #D4AF37);
+  color: #111111;
+  border-radius: 16px 16px 4px 16px;
+}
+
+.chat-ai {
+  background: #F7F7F5;
+  border: 1px solid #E8E8E8;
+  color: #111111;
+  border-radius: 16px 16px 16px 4px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #FAFAFA; }
+::-webkit-scrollbar-thumb { background: #C7C7C7; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #D4AF37; }
