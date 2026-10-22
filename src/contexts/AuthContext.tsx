@@ -22,7 +22,9 @@ function mapProfile(data: Record<string, unknown> | null): UserProfile | null {
   const studios = data.studios as { onboarding_completed?: boolean } | { onboarding_completed?: boolean }[] | null
   const onboarding = Array.isArray(studios) ? studios[0]?.onboarding_completed : studios?.onboarding_completed
   const { studios: _ignored, ...userFields } = data
-  return { ...userFields, onboarding_completed: onboarding ?? false } as UserProfile
+  const studioId = (userFields.studio_id as string | null) ?? null
+  const completed = studioId ? (onboarding ?? false) : false
+  return { ...userFields, studio_id: studioId, professional_id: (userFields.professional_id as string | null) ?? null, onboarding_completed: completed } as UserProfile
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

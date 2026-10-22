@@ -4,26 +4,30 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard, Bot, CalendarDays, Users, Scissors,
   Stethoscope, Zap, DollarSign, BarChart3, Store, Settings,
-  LogOut, ChevronLeft, ChevronRight, Menu, MessageSquare,
+  LogOut, ChevronLeft, ChevronRight, Menu, MessageSquare, UserPlus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { ModeToggle } from '@/components/mode-toggle'
+import { NotificationBell } from '@/components/NotificationBell'
+import { canAccessPath } from '@/lib/roles'
 
 const navItems = [
-  { to: '/app', icon: LayoutDashboard, label: 'Dashboard', end: true },
-  { to: '/app/agenda', icon: CalendarDays, label: 'Agenda' },
-  { to: '/app/conversas', icon: MessageSquare, label: 'Conversas' },
-  { to: '/app/clientes', icon: Users, label: 'Clientes' },
-  { to: '/app/procedimentos', icon: Scissors, label: 'Procedimentos' },
-  { to: '/app/profissionais', icon: Stethoscope, label: 'Profissionais' },
-  { to: '/app/secretaria-ia', icon: Bot, label: 'SecretarIA' },
-  { to: '/app/automacoes', icon: Zap, label: 'Automações' },
-  { to: '/app/financeiro', icon: DollarSign, label: 'Financeiro' },
-  { to: '/app/relatorios', icon: BarChart3, label: 'Relatórios' },
-  { to: '/app/studio', icon: Store, label: 'Studio' },
-  { to: '/app/configuracoes', icon: Settings, label: 'Configurações' },
+  { to: '/app', icon: LayoutDashboard, label: 'Dashboard', end: true, roles: ['owner', 'admin', 'reception', 'professional'] },
+  { to: '/app/agenda', icon: CalendarDays, label: 'Agenda', roles: ['owner', 'admin', 'reception', 'professional'] },
+  { to: '/app/conversas', icon: MessageSquare, label: 'Conversas', roles: ['owner', 'admin', 'reception', 'professional'] },
+  { to: '/app/clientes', icon: Users, label: 'Clientes', roles: ['owner', 'admin', 'reception', 'professional'] },
+  { to: '/app/procedimentos', icon: Scissors, label: 'Procedimentos', roles: ['owner', 'admin', 'reception'] },
+  { to: '/app/profissionais', icon: Stethoscope, label: 'Profissionais', roles: ['owner', 'admin', 'reception'] },
+  { to: '/app/secretaria-ia', icon: Bot, label: 'SecretarIA', roles: ['owner', 'admin'] },
+  { to: '/app/automacoes', icon: Zap, label: 'Automações', roles: ['owner', 'admin'] },
+  { to: '/app/financeiro', icon: DollarSign, label: 'Financeiro', roles: ['owner', 'admin', 'reception'] },
+  { to: '/app/relatorios', icon: BarChart3, label: 'Relatórios', roles: ['owner', 'admin'] },
+  { to: '/app/studio', icon: Store, label: 'Studio', roles: ['owner', 'admin'] },
+  { to: '/app/equipe', icon: UserPlus, label: 'Equipe', roles: ['owner', 'admin'] },
+  { to: '/app/configuracoes', icon: Settings, label: 'Configurações', roles: ['owner', 'admin'] },
 ]
 
 export function AppLayout() {
@@ -38,6 +42,8 @@ export function AppLayout() {
   }
 
   const initials = (profile?.name || user?.email || 'S').slice(0, 2).toUpperCase()
+  const role = profile?.role || 'owner'
+  const visibleNav = navItems.filter((item) => canAccessPath(role, item.to))
 
   return (
     <div className="flex min-h-screen bg-[var(--canvas)]">
@@ -64,7 +70,7 @@ export function AppLayout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-          {navItems.map(({ to, icon: Icon, label, end }) => (
+          {visibleNav.map(({ to, icon: Icon, label, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -100,6 +106,7 @@ export function AppLayout() {
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate">{profile?.name || user?.email}</p>
+                <p className="text-[10px] text-[var(--ink-400)] capitalize">{role === 'reception' ? 'Recepção' : role === 'professional' ? 'Profissional' : 'Dona'}</p>
               </div>
             )}
             {!collapsed && (
@@ -124,15 +131,19 @@ export function AppLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="md:hidden flex items-center gap-3 px-4 py-3 border-b border-[var(--ink-200)] bg-[var(--canvas)]">
-          <Button variant="ghost" size="icon-sm" onClick={() => setMobileOpen(true)}>
+        <header className="flex items-center gap-3 px-4 py-3 border-b border-[var(--ink-200)] bg-[var(--canvas)]">
+          <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={() => setMobileOpen(true)}>
             <Menu className="size-4" />
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 md:hidden">
             <div className="w-6 h-6 rounded gold-gradient flex items-center justify-center">
               <span className="text-xs font-serif font-semibold">S</span>
             </div>
             <span className="text-sm font-serif font-medium">SecretarIA</span>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <NotificationBell />
+            <ModeToggle />
           </div>
         </header>
 

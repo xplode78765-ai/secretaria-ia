@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Payment, Client } from '@/lib/supabase'
-import { format } from 'date-fns'
+import { format, startOfDay, endOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { Plus, DollarSign, Trash2, CheckCircle2, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -37,16 +37,34 @@ export function FinanceiroPage() {
   const save = async () => {
     if (!profile?.studio_id) { toast.error('Studio não encontrado'); return }
     setSaving(true)
-    const { error } = await supabase.from('payments').insert({ studio_id: profile.studio_id, client_id: form.client_id || null, amount: parseFloat(form.amount) || 0, status: form.status, method: form.method, due_date: form.due_date || null })
+    const paid = form.status === 'paid'
+    const { error } = await supabase.from('payments').insert({ studio_id: profile.studio_id, client_id: form.client_id || null, amount: parseFloat(form.amount) || 0, status: form.status, method: form.method, due_date: form.due_date || null, paid_at: paid ? new Date().toISOString() : null })
     if (error) { toast.error('Erro ao salvar: ' + error.message); setSaving(false); return }
     setDialogOpen(false); setSaving(false); setForm({ client_id: '', amount: '', status: 'pending', method: 'pix', due_date: '' }); loadData()
   }
 
-  const markPaid = async (p: Payment) => { await supabase.from('payments').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', p.id); loadData() }
-  const del = async (id: string) => { await supabase.from('payments').delete().eq('id', id); loadData() }
+  const markPaid = async (p: Payment) => {
+    const { error } = await supabase.from('payments').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', p.id)
+    if (error) { toast.error(error.message); return }
+    loadData()
+  }
+  const del = async (id: string) => {
+    const { error } = await supabase.from('payments').delete().eq('id', id)
+    if (error) { toast.error(error.message); return }
+    loadData()
+  }
 
+  const dayStart = startOfDay(new Date()).getTime()
+  const dayEnd = endOfDay(new Date()).getTime()
+  const inToday = (iso: string | null | undefined) => {
+    if (!iso) return false
+    const t = new Date(iso).getTime()
+    return t >= dayStart && t <= dayEnd
+  }
   const totalPaid = payments.filter(p => p.status === 'paid').reduce((acc, p) => acc + p.amount, 0)
   const totalPending = payments.filter(p => p.status === 'pending').reduce((acc, p) => acc + p.amount, 0)
+  const caixaHoje = payments.filter(p => p.status === 'paid' && inToday(p.paid_at || p.created_at)).reduce((acc, p) => acc + p.amount, 0)
+  const comissaoHoje = payments.filter(p => p.status === 'paid' && inToday(p.paid_at || p.created_at)).reduce((acc, p) => acc + Number(p.commission_amount || 0), 0)
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -55,7 +73,9 @@ export function FinanceiroPage() {
         <Button className="btn-gold gap-2" onClick={() => setDialogOpen(true)}><Plus className="size-4" /> Novo Pagamento</Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="luxury-card p-5"><div className="flex items-center justify-between mb-2"><p className="text-sm text-[var(--ink-500)]">Caixa de hoje</p><DollarSign className="size-4 text-[var(--gold)]" /></div><p className="text-2xl font-serif font-medium gold-gradient-text">R$ {caixaHoje.toFixed(2)}</p></div>
+        <div className="luxury-card p-5"><div className="flex items-center justify-between mb-2"><p className="text-sm text-[var(--ink-500)]">Comissões hoje</p><Clock className="size-4 text-[var(--ink-400)]" /></div><p className="text-2xl font-serif font-medium">R$ {comissaoHoje.toFixed(2)}</p></div>
         <div className="luxury-card p-5"><div className="flex items-center justify-between mb-2"><p className="text-sm text-[var(--ink-500)]">Recebido</p><CheckCircle2 className="size-4 text-[var(--success)]" /></div><p className="text-2xl font-serif font-medium text-[var(--success-700)]">R$ {totalPaid.toFixed(2)}</p></div>
         <div className="luxury-card p-5"><div className="flex items-center justify-between mb-2"><p className="text-sm text-[var(--ink-500)]">Pendente</p><Clock className="size-4 text-[var(--warning)]" /></div><p className="text-2xl font-serif font-medium text-[var(--warning-700)]">R$ {totalPending.toFixed(2)}</p></div>
         <div className="luxury-card p-5"><div className="flex items-center justify-between mb-2"><p className="text-sm text-[var(--ink-500)]">Total</p><DollarSign className="size-4 text-[var(--gold)]" /></div><p className="text-2xl font-serif font-medium gold-gradient-text">R$ {(totalPaid + totalPending).toFixed(2)}</p></div>

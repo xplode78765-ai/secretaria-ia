@@ -33,7 +33,7 @@ export function AgendaPage() {
   const [form, setForm] = useState({ title: '', client_id: '', professional_id: '', procedure_id: '', start_time: '', end_time: '', price: '', status: 'pending', notes: '' })
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { loadData() }, [currentDate, view])
+  useEffect(() => { loadData() }, [currentDate, view, profile?.professional_id, profile?.role])
 
   const loadData = async () => {
     let start: Date, end: Date
@@ -41,8 +41,12 @@ export function AgendaPage() {
     else if (view === 'month') { start = startOfMonth(currentDate); end = endOfMonth(currentDate) }
     else { start = new Date(currentDate); start.setHours(0, 0, 0, 0); end = new Date(currentDate); end.setHours(23, 59, 59, 999) }
 
+    let aptsQuery = supabase.from('appointments').select('*, clients(name)').gte('start_time', start.toISOString()).lte('start_time', end.toISOString()).order('start_time')
+    if (profile?.role === 'professional' && profile.professional_id) {
+      aptsQuery = aptsQuery.eq('professional_id', profile.professional_id)
+    }
     const [aptsRes, clientsRes, procsRes, profsRes] = await Promise.all([
-      supabase.from('appointments').select('*, clients(name)').gte('start_time', start.toISOString()).lte('start_time', end.toISOString()).order('start_time'),
+      aptsQuery,
       supabase.from('clients').select('*').order('name'),
       supabase.from('procedures').select('*').eq('active', true).order('name'),
       supabase.from('professionals').select('*').eq('active', true).order('name'),
@@ -78,15 +82,59 @@ export function AgendaPage() {
     if (!profile?.studio_id) { toast.error('Studio não encontrado'); return }
     setSaving(true)
     const startLocal = new Date(form.start_time)
-    const payload = { studio_id: profile.studio_id, title: form.title, client_id: form.client_id || null, professional_id: form.professional_id || null, procedure_id: form.procedure_id || null, start_time: startLocal.toISOString(), end_time: new Date(form.end_time).toISOString(), price: parseFloat(form.price) || 0, status: form.status, notes: form.notes, date: format(startLocal, 'yyyy-MM-dd') }
+    const endLocal = new Date(form.end_time)
+    if (endLocal.getTime() <= startLocal.getTime()) { toast.error('O término precisa ser depois do início'); setSaving(false); return }
+    let clashQuery = supabase.from('appointments').select('id, professional_id, status').eq('studio_id', profile.studio_id).neq('status', 'cancelled').lt('start_time', endLocal.toISOString()).gt('end_time', startLocal.toISOString())
+    const { data: clashRows } = await clashQuery
+    const clash = (clashRows ?? []).some((a) => {
+      if (editApt && a.id === editApt.id) return false
+      if (form.professional_id && a.professional_id && a.professional_id !== form.professional_id) return false
+      return true
+    })
+    if (clash) { toast.error('Já existe um horário nesse intervalo'); setSaving(false); return }
+    const payload = { studio_id: profile.studio_id, title: form.title, client_id: form.client_id || null, professional_id: form.professional_id || null, procedure_id: form.procedure_id || null, start_time: startLocal.toISOString(), end_time: endLocal.toISOString(), price: parseFloat(form.price) || 0, status: form.status, notes: form.notes, date: format(startLocal, 'yyyy-MM-dd') }
     let result
-    if (editApt) result = await supabase.from('appointments').update(payload).eq('id', editApt.id)
-    else result = await supabase.from('appointments').insert(payload)
+    let aptId = editApt?.id
+    if (editApt) {
+      result = await supabase.from('appointments').update(payload).eq('id', editApt.id).select('id').single()
+      aptId = result.data?.id ?? editApt.id
+    } else {
+      result = await supabase.from('appointments').insert(payload).select('id').single()
+      aptId = result.data?.id
+    }
     if (result.error) { toast.error('Erro ao salvar: ' + result.error.message); setSaving(false); return }
+    if (form.status === 'done' && (parseFloat(form.price) || 0) > 0) {
+      let commission = 0
+      if (form.professional_id) {
+        const { data: prof } = await supabase.from('professionals').select('commission_percent').eq('id', form.professional_id).maybeSingle()
+        commission = ((parseFloat(form.price) || 0) * Number(prof?.commission_percent || 0)) / 100
+      }
+      const { data: existingPay } = aptId
+        ? await supabase.from('payments').select('id').eq('appointment_id', aptId).limit(1)
+        : { data: [] }
+      if (aptId && (!existingPay || existingPay.length === 0)) {
+        const { error: payError } = await supabase.from('payments').insert({
+          studio_id: profile.studio_id,
+          client_id: form.client_id || null,
+          appointment_id: aptId,
+          professional_id: form.professional_id || null,
+          amount: parseFloat(form.price) || 0,
+          commission_amount: commission,
+          status: 'paid',
+          method: 'caixa',
+          paid_at: new Date().toISOString(),
+        })
+        if (payError) toast.error('Horário salvo, mas o caixa falhou: ' + payError.message)
+      }
+    }
     setDialogOpen(false); setSaving(false); loadData()
   }
 
-  const deleteApt = async (id: string) => { await supabase.from('appointments').delete().eq('id', id); setDialogOpen(false); loadData() }
+  const deleteApt = async (id: string) => {
+    const { error } = await supabase.from('appointments').delete().eq('id', id)
+    if (error) { toast.error(error.message); return }
+    setDialogOpen(false); loadData()
+  }
 
   const statusColor: Record<string, string> = {
     pending: 'bg-[var(--warning-50)] border-[var(--warning-100)] text-[var(--warning-700)]',

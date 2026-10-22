@@ -17,7 +17,7 @@ export function ProfissionaisPage() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editProf, setEditProf] = useState<Professional | null>(null)
-  const [form, setForm] = useState({ name: '', specialty: '', phone: '', active: true })
+  const [form, setForm] = useState({ name: '', specialty: '', phone: '', active: true, commission_percent: '0' })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { loadProfessionals() }, [])
@@ -28,15 +28,15 @@ export function ProfissionaisPage() {
     setLoading(false)
   }
 
-  const openNew = () => { setEditProf(null); setForm({ name: '', specialty: '', phone: '', active: true }); setDialogOpen(true) }
-  const openEdit = (p: Professional) => { setEditProf(p); setForm({ name: p.name, specialty: p.specialty, phone: p.phone, active: p.active }); setDialogOpen(true) }
+  const openNew = () => { setEditProf(null); setForm({ name: '', specialty: '', phone: '', active: true, commission_percent: '0' }); setDialogOpen(true) }
+  const openEdit = (p: Professional) => { setEditProf(p); setForm({ name: p.name, specialty: p.specialty, phone: p.phone, active: p.active, commission_percent: String(p.commission_percent ?? 0) }); setDialogOpen(true) }
 
   const save = async () => {
     if (!profile?.studio_id) { toast.error('Studio não encontrado'); return }
     setSaving(true)
-    const payload = { studio_id: profile.studio_id, name: form.name, specialty: form.specialty, phone: form.phone, active: form.active }
+    const payload = { studio_id: profile.studio_id, name: form.name, specialty: form.specialty, phone: form.phone, active: form.active, commission_percent: parseFloat(form.commission_percent) || 0 }
     let result
-    if (editProf) result = await supabase.from('professionals').update({ name: payload.name, specialty: payload.specialty, phone: payload.phone, active: payload.active }).eq('id', editProf.id)
+    if (editProf) result = await supabase.from('professionals').update({ name: payload.name, specialty: payload.specialty, phone: payload.phone, active: payload.active, commission_percent: payload.commission_percent }).eq('id', editProf.id)
     else result = await supabase.from('professionals').insert(payload)
     if (result.error) { toast.error('Erro ao salvar: ' + result.error.message); setSaving(false); return }
     setDialogOpen(false); setSaving(false); loadProfessionals()
@@ -67,6 +67,7 @@ export function ProfissionaisPage() {
                   <p className="text-sm font-medium truncate">{p.name}</p>
                   <p className="text-xs text-[var(--ink-500)]">{p.specialty || 'Sem especialidade'}</p>
                   {p.phone && <p className="text-xs text-[var(--ink-500)] flex items-center gap-1 mt-0.5"><Phone className="size-3" />{p.phone}</p>}
+                  <p className="text-xs text-[var(--ink-400)] mt-0.5">Comissão {Number(p.commission_percent || 0)}%</p>
                 </div>
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="icon-sm" onClick={() => openEdit(p)}><Edit className="size-3.5" /></Button>
@@ -89,6 +90,7 @@ export function ProfissionaisPage() {
             <div className="space-y-1.5"><Label>Nome *</Label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Nome completo" /></div>
             <div className="space-y-1.5"><Label>Especialidade</Label><Input value={form.specialty} onChange={e => setForm(f => ({ ...f, specialty: e.target.value }))} placeholder="Ex: Esteticista" /></div>
             <div className="space-y-1.5"><Label>Telefone</Label><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="(11) 99999-9999" /></div>
+            <div className="space-y-1.5"><Label>Comissão %</Label><Input type="number" value={form.commission_percent} onChange={e => setForm(f => ({ ...f, commission_percent: e.target.value }))} /></div>
             <div className="flex items-center gap-2"><Switch checked={form.active} onCheckedChange={v => setForm(f => ({ ...f, active: v }))} /><Label>Ativo</Label></div>
             <div className="flex gap-2 pt-2"><Button variant="outline" className="flex-1" onClick={() => setDialogOpen(false)}>Cancelar</Button><Button className="flex-1 btn-gold" onClick={save} disabled={saving || !form.name}>{saving ? <Spinner className="size-4" /> : 'Salvar'}</Button></div>
           </div>

@@ -1,35 +1,43 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 import type { Appointment, Client } from '@/lib/supabase'
 import { format, startOfDay, endOfDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { CalendarDays, Users, TrendingUp, Bot, ChevronRight, MessageSquare } from 'lucide-react'
+import { CalendarDays, Users, TrendingUp, Bot, ChevronRight, MessageSquare, DollarSign } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 
 type AptWithClient = Appointment & { clients: Pick<Client, 'name'> | null }
 
 export function DashboardPage() {
+  const { profile } = useAuth()
   const [todayApts, setTodayApts] = useState<AptWithClient[]>([])
   const [totalClients, setTotalClients] = useState(0)
   const [monthRevenue, setMonthRevenue] = useState(0)
   const [activeConvs, setActiveConvs] = useState(0)
+  const [caixaHoje, setCaixaHoje] = useState(0)
   const [loading, setLoading] = useState(true)
   const today = new Date()
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { loadData() }, [profile?.professional_id, profile?.role])
 
   const loadData = async () => {
     const startOfToday = startOfDay(today).toISOString()
     const endOfToday = endOfDay(today).toISOString()
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
 
-    const [aptsRes, clientsRes, monthRes, convsRes] = await Promise.all([
-      supabase.from('appointments').select('*, clients(name)').gte('start_time', startOfToday).lte('start_time', endOfToday).order('start_time'),
+    let aptsQuery = supabase.from('appointments').select('*, clients(name)').gte('start_time', startOfToday).lte('start_time', endOfToday).order('start_time')
+    if (profile?.role === 'professional' && profile.professional_id) {
+      aptsQuery = aptsQuery.eq('professional_id', profile.professional_id)
+    }
+    const [aptsRes, clientsRes, monthRes, convsRes, payRes] = await Promise.all([
+      aptsQuery,
       supabase.from('clients').select('id', { count: 'exact', head: true }),
       supabase.from('appointments').select('price').gte('start_time', startOfMonth).eq('status', 'done'),
       supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+      supabase.from('payments').select('amount').eq('status', 'paid').gte('paid_at', startOfToday).lte('paid_at', endOfToday),
     ])
 
     const apts = (aptsRes.data ?? []) as AptWithClient[]
@@ -37,6 +45,7 @@ export function DashboardPage() {
     setTotalClients(clientsRes.count ?? 0)
     setMonthRevenue((monthRes.data ?? []).reduce((acc, a) => acc + (a.price ?? 0), 0))
     setActiveConvs(convsRes.count ?? 0)
+    setCaixaHoje((payRes.data ?? []).reduce((acc, p) => acc + Number(p.amount ?? 0), 0))
     setLoading(false)
   }
 
@@ -51,6 +60,7 @@ export function DashboardPage() {
     { title: 'Agendamentos Hoje', value: todayApts.length, icon: CalendarDays, desc: `${todayApts.filter(a => a.status === 'confirmed').length} confirmados`, gold: true },
     { title: 'Total de Clientes', value: totalClients, icon: Users, desc: 'na sua base' },
     { title: 'Faturamento do Mês', value: `R$ ${monthRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: TrendingUp, desc: 'procedimentos realizados' },
+    { title: 'Caixa de hoje', value: `R$ ${caixaHoje.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: DollarSign, desc: 'pagamentos recebidos' },
     { title: 'Conversas Ativas', value: activeConvs, icon: MessageSquare, desc: 'no WhatsApp' },
   ]
 
@@ -66,7 +76,7 @@ export function DashboardPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         {cards.map((c, i) => (
           <div key={i} className={`luxury-card p-5 ${c.gold ? 'relative overflow-hidden' : ''}`}>
             {c.gold && <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'repeating-linear-gradient(45deg, #D4AF37 0px, #D4AF37 1px, transparent 1px, transparent  8px)' }} />}

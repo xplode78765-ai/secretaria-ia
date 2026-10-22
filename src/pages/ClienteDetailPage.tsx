@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
 import { ArrowLeft, Phone, Mail, CalendarDays, DollarSign, Edit, Save } from 'lucide-react'
+import { toast } from 'sonner'
 
 export function ClienteDetailPage() {
   const { id } = useParams()
@@ -18,7 +19,8 @@ export function ClienteDetailPage() {
   const [payments, setPayments] = useState<Payment[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({ name: '', phone: '', whatsapp: '', email: '', notes: '' })
+  const [form, setForm] = useState({ name: '', phone: '', whatsapp: '', email: '', notes: '', birthday: '', anamnesis: '' })
+  const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { if (id) loadData(id) }, [id])
@@ -32,14 +34,40 @@ export function ClienteDetailPage() {
     setClient(clientRes.data as Client | null)
     setAppointments(aptsRes.data ?? [])
     setPayments(paysRes.data ?? [])
-    if (clientRes.data) setForm({ name: clientRes.data.name, phone: clientRes.data.phone, whatsapp: clientRes.data.whatsapp, email: clientRes.data.email, notes: clientRes.data.notes })
+    if (clientRes.data) setForm({
+      name: clientRes.data.name,
+      phone: clientRes.data.phone,
+      whatsapp: clientRes.data.whatsapp,
+      email: clientRes.data.email,
+      notes: clientRes.data.notes,
+      birthday: clientRes.data.birthday || '',
+      anamnesis: clientRes.data.anamnesis || '',
+    })
     setLoading(false)
   }
 
   const saveEdit = async () => {
     setSaving(true)
-    if (id) { await supabase.from('clients').update(form).eq('id', id); loadData(id); setEditing(false) }
+    if (id) {
+      const { error } = await supabase.from('clients').update({ ...form, birthday: form.birthday || null }).eq('id', id)
+      if (error) { toast.error(error.message); setSaving(false); return }
+      toast.success('Ficha atualizada')
+      loadData(id)
+      setEditing(false)
+    }
     setSaving(false)
+  }
+
+  const uploadPhoto = async (file: File) => {
+    if (!id || !client) return
+    setUploading(true)
+    const path = `${client.studio_id}/${id}-${Date.now()}`
+    const { error } = await supabase.storage.from('client-photos').upload(path, file, { upsert: true })
+    if (error) { toast.error(error.message); setUploading(false); return }
+    const { data } = supabase.storage.from('client-photos').getPublicUrl(path)
+    await supabase.from('clients').update({ photo_url: data.publicUrl }).eq('id', id)
+    setUploading(false)
+    loadData(id)
   }
 
   const statusBadge: Record<string, string> = {
@@ -61,7 +89,11 @@ export function ClienteDetailPage() {
 
       <div className="luxury-card p-6">
         <div className="flex items-start gap-4">
-          <div className="w-16 h-16 rounded-full gold-gradient flex items-center justify-center text-xl font-medium flex-shrink-0">{client.name.slice(0, 1).toUpperCase()}</div>
+          {client.photo_url ? (
+            <img src={client.photo_url} alt="" className="w-16 h-16 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-16 h-16 rounded-full gold-gradient flex items-center justify-center text-xl font-medium flex-shrink-0">{client.name.slice(0, 1).toUpperCase()}</div>
+          )}
           <div className="flex-1">
             {editing ? (
               <div className="space-y-3">
@@ -71,6 +103,9 @@ export function ClienteDetailPage() {
                   <div className="space-y-1"><Label className="text-xs">WhatsApp</Label><Input value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))} /></div>
                 </div>
                 <div className="space-y-1"><Label className="text-xs">E-mail</Label><Input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
+                <div className="space-y-1"><Label className="text-xs">Aniversário</Label><Input type="date" value={form.birthday} onChange={e => setForm(f => ({ ...f, birthday: e.target.value }))} /></div>
+                <div className="space-y-1"><Label className="text-xs">Foto</Label><Input type="file" accept="image/*" disabled={uploading} onChange={e => { const f = e.target.files?.[0]; if (f) void uploadPhoto(f) }} /></div>
+                <div className="space-y-1"><Label className="text-xs">Anamnese</Label><Textarea value={form.anamnesis} onChange={e => setForm(f => ({ ...f, anamnesis: e.target.value }))} rows={4} /></div>
                 <div className="space-y-1"><Label className="text-xs">Observações</Label><Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} /></div>
                 <div className="flex gap-2"><Button className="btn-gold gap-2" onClick={saveEdit} disabled={saving}><Save className="size-3.5" />Salvar</Button><Button variant="outline" onClick={() => setEditing(false)}>Cancelar</Button></div>
               </div>
@@ -84,6 +119,8 @@ export function ClienteDetailPage() {
                 <div className="space-y-1 text-sm text-[var(--ink-600)]">
                   {client.phone && <p className="flex items-center gap-2"><Phone className="size-3.5 text-[var(--ink-400)]" />{client.phone}</p>}
                   {client.email && <p className="flex items-center gap-2"><Mail className="size-3.5 text-[var(--ink-400)]" />{client.email}</p>}
+                  {client.birthday && <p className="text-sm text-[var(--ink-500)]">Aniversário: {format(new Date(client.birthday + 'T12:00:00'), 'dd/MM')}</p>}
+                  {client.anamnesis && <p className="mt-2 text-sm whitespace-pre-wrap">{client.anamnesis}</p>}
                   {client.notes && <p className="mt-2 text-[var(--ink-500)] italic">{client.notes}</p>}
                 </div>
               </>

@@ -17,3 +17,11 @@ entrypoint = "./functions/appointment-reminders/index.ts"
 [functions.admin-panel]
 verify_jwt = true
 entrypoint = "./functions/admin-panel/index.ts"
+
+[functions.public-booking]
+verify_jwt = false
+entrypoint = "./functions/public-booking/index.ts"
+
+[functions.studio-team]
+verify_jwt = true
+entrypoint = "./functions/studio-team/index.ts"

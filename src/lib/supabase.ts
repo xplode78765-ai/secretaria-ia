@@ -12,7 +12,9 @@ export type Studio = {
   phone: string
   address: string
   whatsapp_number: string
+  staff_whatsapp: string
   instagram: string
+  slug: string
   business_hours: Record<string, unknown>
   onboarding_completed: boolean
   created_at: string
@@ -26,6 +28,7 @@ export type UserProfile = {
   email: string
   phone: string
   role: string
+  professional_id: string | null
   is_super_admin: boolean
   onboarding_completed: boolean
   created_at: string
@@ -70,6 +73,9 @@ export type Client = {
   status: string
   source: string
   notes: string
+  birthday: string | null
+  anamnesis: string
+  photo_url: string
   created_at: string
 }
 
@@ -90,6 +96,7 @@ export type Professional = {
   specialty: string
   phone: string
   active: boolean
+  commission_percent: number
   created_at: string
 }
 
@@ -118,6 +125,7 @@ export type Conversation = {
   status: string
   ai_enabled: boolean
   last_message_at: string | null
+  ai_state: Record<string, unknown>
   created_at: string
 }
 
@@ -141,6 +149,9 @@ export type Payment = {
   method: string
   due_date: string | null
   paid_at: string | null
+  appointment_id: string | null
+  professional_id: string | null
+  commission_amount: number
   created_at: string
 }
 
@@ -174,6 +185,7 @@ export type Notification = {
   type: string
   title: string
   content: string
+  read_at: string | null
   created_at: string
 }
 

@@ -1,7 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { formatSaoPaulo, saoPauloDayBounds, saoPauloHour, saoPauloYmd } from "../_shared/brazil.ts";
+import { notifyStudioStaff } from "../_shared/staff-alert.ts";
 
 const DEFAULT_ORIGIN = "https://secretaria.app";
-const TZ = "America/Sao_Paulo";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -22,7 +23,7 @@ function originAllowed(origin: string, allowlist: string[]): boolean {
   try {
     const host = new URL(origin).hostname;
     if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
+    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
   } catch {
     return false;
   }
@@ -46,24 +47,19 @@ async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
   };
 }
 
-function saoPauloDayBounds(now = new Date()) {
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-  const start = new Date(`${day}T00:00:00-03:00`);
-  const end = new Date(`${day}T23:59:59.999-03:00`);
-  return { start, end, day };
-}
-
 async function ensureConversation(studioId: string, clientId: string) {
   const { data: existing } = await supabase.from("conversations").select("id").eq("studio_id", studioId).eq("client_id", clientId).limit(1);
   if (existing?.[0]?.id) return existing[0];
-  const { data } = await supabase.from("conversations").insert({
+  const inserted = await supabase.from("conversations").insert({
     studio_id: studioId,
     client_id: clientId,
     channel: "whatsapp",
     status: "active",
     ai_enabled: true,
   }).select("id").single();
-  return data;
+  if (inserted.data?.id) return inserted.data;
+  const { data: retry } = await supabase.from("conversations").select("id").eq("studio_id", studioId).eq("client_id", clientId).limit(1);
+  return retry?.[0] ?? null;
 }
 
 async function reminderAlreadySent(conversationId: string, appointmentId: string, sinceIso: string, extraType?: string) {
@@ -80,11 +76,12 @@ async function reminderAlreadySent(conversationId: string, appointmentId: string
 }
 
 async function sendWhatsApp(conn: { evolution_api_url: string; evolution_api_key: string; instance_name: string }, number: string, text: string) {
-  await fetch(`${conn.evolution_api_url}/message/sendText/${conn.instance_name}`, {
+  const res = await fetch(`${conn.evolution_api_url}/message/sendText/${conn.instance_name}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: conn.evolution_api_key },
     body: JSON.stringify({ number, text }),
   });
+  return res.ok;
 }
 
 Deno.serve(async (req: Request) => {
@@ -123,7 +120,13 @@ Deno.serve(async (req: Request) => {
 
     const { data: automations } = await supabase.from("automations").select("studio_id, trigger, enabled");
     const enabledByStudio: Record<string, Set<string>> = {};
+    const dayOfOff = new Set<string>();
+    const dayOfOn = new Set<string>();
     for (const a of automations || []) {
+      if (a.trigger === "reminder_day_of") {
+        if (a.enabled) dayOfOn.add(a.studio_id);
+        else dayOfOff.add(a.studio_id);
+      }
       if (!a.enabled) continue;
       if (!enabledByStudio[a.studio_id]) enabledByStudio[a.studio_id] = new Set();
       enabledByStudio[a.studio_id].add(a.trigger);
@@ -147,14 +150,19 @@ Deno.serve(async (req: Request) => {
       const clientPhone = apt.clients?.whatsapp || apt.clients?.phone;
       if (!clientPhone) return;
       const reminderText = textBuilder();
-      await sendWhatsApp(conn, clientPhone, reminderText);
-      await supabase.from("messages").insert({
+      const sent = await sendWhatsApp(conn, clientPhone, reminderText);
+      if (!sent) return;
+      const { error: msgErr } = await supabase.from("messages").insert({
         conversation_id: conv.id,
         sender_type: "ai",
         content: reminderText,
         message_type: "text",
         metadata: { type: reminderType, appointment_id: apt.id },
       });
+      if (msgErr && !String(msgErr.message || "").toLowerCase().includes("duplicate")) return;
+      await supabase.from("conversations").update({
+        ai_state: { step: "awaiting_confirm", appointment_id: apt.id },
+      }).eq("id", conv.id);
       if (apt.professionals?.phone) {
         await sendWhatsApp(conn, apt.professionals.phone, `Lembrete: ${apt.clients?.name} — ${apt.title}.`);
       }
@@ -177,19 +185,17 @@ Deno.serve(async (req: Request) => {
     for (const apt of upcoming || []) {
       const triggers = enabledByStudio[apt.studio_id];
       const start = new Date(apt.start_time).getTime();
-      const useDefaultToday = !triggers || triggers.size === 0;
+      const sendDayOf = dayOfOn.has(apt.studio_id) || !dayOfOff.has(apt.studio_id);
       const startDate = new Date(apt.start_time);
 
-      if ((useDefaultToday || triggers?.has("reminder_24h") || triggers?.has("reminder_1h")) && startDate >= startOfToday && startDate <= endOfToday) {
-        if (useDefaultToday || triggers?.has("reminder_24h") || !triggers) {
-          await processAppointment(apt, "appointment_reminder", () => `Olá ${apt.clients?.name || ""}! Lembrando do seu agendamento para ${apt.title} hoje. Te esperamos!`);
-        }
+      if (sendDayOf && startDate >= startOfToday && startDate <= endOfToday) {
+        await processAppointment(apt, "appointment_reminder", () => `Olá ${apt.clients?.name || ""}! Lembrando do seu agendamento para ${apt.title} hoje. Te esperamos! Responda 1 para confirmar ou 2 para cancelar.`);
       }
       if (triggers?.has("reminder_1h") && start >= in1hStart.getTime() && start <= in1hEnd.getTime()) {
-        await processAppointment(apt, "appointment_reminder_1h", () => `Olá ${apt.clients?.name || ""}! Seu horário de ${apt.title} é daqui a pouco. Te esperamos!`);
+        await processAppointment(apt, "appointment_reminder_1h", () => `Olá ${apt.clients?.name || ""}! Seu horário de ${apt.title} é daqui a pouco. Te esperamos! Responda 1 para confirmar ou 2 para cancelar.`);
       }
       if (triggers?.has("reminder_24h") && start >= in24hStart.getTime() && start <= in24hEnd.getTime()) {
-        await processAppointment(apt, "appointment_reminder_24h", () => `Olá ${apt.clients?.name || ""}! Lembrando do seu agendamento de ${apt.title} amanhã. Qualquer imprevisto, é só avisar.`);
+        await processAppointment(apt, "appointment_reminder_24h", () => `Olá ${apt.clients?.name || ""}! Lembrando do seu agendamento de ${apt.title} amanhã. Responda 1 para confirmar ou 2 para cancelar.`);
       }
     }
 
@@ -225,6 +231,114 @@ Deno.serve(async (req: Request) => {
       for (const apt of stale || []) {
         if (!enabledByStudio[apt.studio_id]?.has(trigger)) continue;
         await processAppointment(apt, trigger, () => `Olá ${apt.clients?.name || ""}! Sentimos sua falta. Que tal agendar um retorno? É só responder esta mensagem.`);
+      }
+    }
+
+    const md = saoPauloYmd(now).slice(4);
+    const { data: birthdayClients } = await supabase.from("clients")
+      .select("id, studio_id, name, phone, whatsapp, birthday")
+      .like("birthday", `%${md}`);
+    for (const client of birthdayClients || []) {
+      if (!enabledByStudio[client.studio_id]?.has("birthday")) continue;
+      const conv = await ensureConversation(client.studio_id, client.id);
+      if (!conv?.id) continue;
+      const sinceIso = startOfToday.toISOString();
+      const { data: already } = await supabase.from("messages")
+        .select("id")
+        .eq("conversation_id", conv.id)
+        .eq("metadata->>type", "birthday")
+        .gte("created_at", sinceIso)
+        .limit(1);
+      if (already && already.length > 0) continue;
+      const conn = connByStudio[client.studio_id];
+      if (!conn) continue;
+      const number = client.whatsapp || client.phone;
+      if (!number) continue;
+      const text = `Feliz aniversário, ${client.name}! Desejamos um dia lindo. Quando quiser agendar um mimo, é só responder aqui.`;
+      const sent = await sendWhatsApp(conn, number, text);
+      if (!sent) continue;
+      await supabase.from("messages").insert({
+        conversation_id: conv.id,
+        sender_type: "ai",
+        content: text,
+        message_type: "text",
+        metadata: { type: "birthday" },
+      });
+      sentCount++;
+    }
+
+    const hour = saoPauloHour(now);
+    const day = saoPauloYmd(now);
+    if (hour === 7) {
+      for (const studioId of Object.keys(connByStudio)) {
+        const { data: already } = await supabase.from("notifications")
+          .select("id")
+          .eq("studio_id", studioId)
+          .eq("type", "staff_digest_morning")
+          .gte("created_at", startOfTodayIso)
+          .limit(1);
+        if (already && already.length > 0) continue;
+        const { data: todays } = await supabase.from("appointments")
+          .select("title, start_time, status, clients(name)")
+          .eq("studio_id", studioId)
+          .neq("status", "cancelled")
+          .gte("start_time", startOfTodayIso)
+          .lte("start_time", endOfToday.toISOString())
+          .order("start_time");
+        const lines = (todays || []).map((apt) => {
+          const client = Array.isArray(apt.clients) ? apt.clients[0] : apt.clients;
+          const when = formatSaoPaulo(new Date(apt.start_time)).split(" ")[1] || formatSaoPaulo(new Date(apt.start_time));
+          return `• ${when} — ${client?.name || "Cliente"} — ${apt.title}`;
+        });
+        const text = lines.length
+          ? `☀️ Agenda de hoje (${day})\n${lines.join("\n")}`
+          : `☀️ Agenda de hoje (${day})\nNenhum horário marcado.`;
+        const sent = await notifyStudioStaff(supabase, studioId, text, connByStudio[studioId]);
+        if (!sent) continue;
+        await supabase.from("notifications").insert({
+          studio_id: studioId,
+          type: "staff_digest_morning",
+          title: "Agenda do dia",
+          content: text,
+        });
+        sentCount++;
+      }
+    }
+
+    if (hour === 20) {
+      for (const studioId of Object.keys(connByStudio)) {
+        const { data: already } = await supabase.from("notifications")
+          .select("id")
+          .eq("studio_id", studioId)
+          .eq("type", "staff_digest_evening")
+          .gte("created_at", startOfTodayIso)
+          .limit(1);
+        if (already && already.length > 0) continue;
+        const { data: todays } = await supabase.from("appointments")
+          .select("title, start_time, status, clients(name)")
+          .eq("studio_id", studioId)
+          .gte("start_time", startOfTodayIso)
+          .lte("start_time", endOfToday.toISOString())
+          .order("start_time");
+        const list = todays || [];
+        const done = list.filter((a) => a.status === "done").length;
+        const cancelled = list.filter((a) => a.status === "cancelled").length;
+        const confirmed = list.filter((a) => a.status === "confirmed" || a.status === "pending").length;
+        const lines = list.map((apt) => {
+          const client = Array.isArray(apt.clients) ? apt.clients[0] : apt.clients;
+          const label = apt.status === "cancelled" ? "cancelado" : apt.status === "done" ? "realizado" : "na agenda";
+          return `• ${client?.name || "Cliente"} — ${apt.title} (${label})`;
+        });
+        const text = `🌙 Resumo do dia (${day})\n${done} realizados · ${confirmed} ainda na agenda · ${cancelled} cancelados\n${lines.length ? lines.join("\n") : "Nenhum movimento hoje."}`;
+        const sent = await notifyStudioStaff(supabase, studioId, text, connByStudio[studioId]);
+        if (!sent) continue;
+        await supabase.from("notifications").insert({
+          studio_id: studioId,
+          type: "staff_digest_evening",
+          title: "Resumo do dia",
+          content: text,
+        });
+        sentCount++;
       }
     }
 

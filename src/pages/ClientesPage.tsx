@@ -22,7 +22,7 @@ export function ClientesPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [form, setForm] = useState({ name: '', phone: '', whatsapp: '', email: '', status: 'active', notes: '', source: 'manual' })
+  const [form, setForm] = useState({ name: '', phone: '', whatsapp: '', email: '', status: 'active', notes: '', source: 'manual', birthday: '' })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { loadClients() }, [])
@@ -36,9 +36,9 @@ export function ClientesPage() {
   const saveClient = async () => {
     if (!profile?.studio_id) { toast.error('Studio não encontrado'); return }
     setSaving(true)
-    const { error } = await supabase.from('clients').insert({ ...form, studio_id: profile.studio_id })
+    const { error } = await supabase.from('clients').insert({ ...form, birthday: form.birthday || null, studio_id: profile.studio_id })
     if (error) { toast.error('Erro ao salvar cliente: ' + error.message); setSaving(false); return }
-    setDialogOpen(false); setSaving(false); setForm({ name: '', phone: '', whatsapp: '', email: '', status: 'active', notes: '', source: 'manual' })
+    setDialogOpen(false); setSaving(false); setForm({ name: '', phone: '', whatsapp: '', email: '', status: 'active', notes: '', source: 'manual', birthday: '' })
     toast.success('Cliente cadastrado!')
     loadClients()
   }
@@ -104,6 +104,7 @@ export function ClientesPage() {
               <div className="space-y-1.5"><Label>WhatsApp</Label><Input value={form.whatsapp} onChange={e => setForm(f => ({ ...f, whatsapp: e.target.value }))} placeholder="5511999999999" /></div>
             </div>
             <div className="space-y-1.5"><Label>E-mail</Label><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="email@exemplo.com" /></div>
+            <div className="space-y-1.5"><Label>Aniversário</Label><Input type="date" value={form.birthday} onChange={e => setForm(f => ({ ...f, birthday: e.target.value }))} /></div>
             <div className="space-y-1.5"><Label>Status</Label><Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Ativo</SelectItem><SelectItem value="inactive">Inativo</SelectItem></SelectContent></Select></div>
             <div className="space-y-1.5"><Label>Observações</Label><Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} /></div>
             <div className="flex gap-2 pt-2"><Button variant="outline" className="flex-1" onClick={() => setDialogOpen(false)}>Cancelar</Button><Button className="flex-1 btn-gold" onClick={saveClient} disabled={saving || !form.name}>{saving ? <Spinner className="size-4" /> : 'Salvar'}</Button></div>

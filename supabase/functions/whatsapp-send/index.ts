@@ -21,7 +21,7 @@ function originAllowed(origin: string, allowlist: string[]): boolean {
   try {
     const host = new URL(origin).hostname;
     if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
+    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
   } catch {
     return false;
   }

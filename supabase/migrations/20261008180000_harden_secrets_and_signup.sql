@@ -1,17 +1,16 @@
--- Generate runtime secrets when still blank, add missing app_secret keys,
--- and make complete_signup idempotent so a confirmed login can finish signup.
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 INSERT INTO public.app_secrets (key, value)
 VALUES
-  ('webhook_secret', encode(gen_random_bytes(32), 'hex')),
-  ('cron_secret', encode(gen_random_bytes(32), 'hex')),
+  ('webhook_secret', encode(extensions.gen_random_bytes(32), 'hex')),
+  ('cron_secret', encode(extensions.gen_random_bytes(32), 'hex')),
   ('evolution_api_key', ''),
   ('evolution_api_url', ''),
   ('allowed_origin', '')
 ON CONFLICT (key) DO NOTHING;
 
 UPDATE public.app_secrets
-SET value = encode(gen_random_bytes(32), 'hex'), updated_at = now()
+SET value = encode(extensions.gen_random_bytes(32), 'hex'), updated_at = now()
 WHERE key IN ('webhook_secret', 'cron_secret')
   AND (value IS NULL OR length(trim(value)) = 0);
 

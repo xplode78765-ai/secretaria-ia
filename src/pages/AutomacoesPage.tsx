@@ -42,6 +42,7 @@ export function AutomacoesPage() {
   const triggerLabels: Record<string, string> = {
     'reminder_24h': 'Lembrete 24h antes',
     'reminder_1h': 'Lembrete 1h antes',
+    'reminder_day_of': 'Lembrete no dia',
     'birthday': 'Mensagem de aniversário',
     'follow_up_7d': 'Follow-up 7 dias',
     'winback_30d': 'Resgate 30 dias',

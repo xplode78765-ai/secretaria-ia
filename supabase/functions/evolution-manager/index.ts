@@ -21,7 +21,7 @@ function originAllowed(origin: string, allowlist: string[]): boolean {
   try {
     const host = new URL(origin).hostname;
     if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
+    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
   } catch {
     return false;
   }
@@ -43,11 +43,6 @@ async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey, X-Webhook-Secret, X-Cron-Secret",
     Vary: "Origin",
   };
-}
-
-async function getStudioId(userId: string): Promise<string | null> {
-  const { data } = await supabase.from("users").select("studio_id").eq("id", userId).maybeSingle();
-  return data?.studio_id ?? null;
 }
 
 async function getConnection(studioId: string) {
@@ -156,9 +151,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Invalid token" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const studioId = await getStudioId(user.id);
+    const { data: me } = await supabase.from("users").select("studio_id, role").eq("id", user.id).maybeSingle();
+    const studioId = me?.studio_id ?? null;
     if (!studioId) {
       return new Response(JSON.stringify({ error: "No studio found" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (me.role !== "owner" && me.role !== "admin") {
+      return new Response(JSON.stringify({ error: "Apenas a dona do studio pode gerenciar o WhatsApp" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const body = await req.json();
@@ -231,6 +230,55 @@ Deno.serve(async (req: Request) => {
           console.warn(`[evolution-manager] fetchInstances request failed: ${checkErr.message} — treating as needsCreate`);
           needsCreate = true;
         }
+      }
+
+      async function registerWebhook() {
+        const webhookSetRes = await fetch(`${apiUrl}/webhook/set/${instanceName}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: apiKey },
+          body: JSON.stringify({
+            webhook: {
+              enabled: true,
+              url: webhookUrl,
+              headers: webhookHeaders,
+              byEvents: false,
+              base64: true,
+              events: webhookEvents,
+            },
+          }),
+        });
+        if (!webhookSetRes.ok) {
+          const webhookErr = await webhookSetRes.text();
+          console.error(`[evolution-manager] Webhook registration failed for ${instanceName}: ${webhookErr.slice(0, 500)}`);
+        }
+      }
+
+      if (!needsCreate) {
+        try {
+          const statusRes = await fetch(`${apiUrl}/instance/connectionState/${instanceName}`, {
+            method: "GET",
+            headers: { apikey: apiKey },
+          });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            const state = String(statusData?.instance?.state || "").toUpperCase();
+            if (state === "OPEN" || state === "CONNECTED") {
+              await registerWebhook();
+              const phone = statusData?.instance?.ownerJid?.split("@")[0] || "";
+              await supabase.from("evolution_api_connections").update({
+                status: "connected",
+                phone_number: phone,
+                last_connected_at: new Date().toISOString(),
+                qr_code: "",
+                error_message: "",
+              }).eq("studio_id", studioId);
+              return new Response(JSON.stringify({ status: "connected", phone }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }
+          }
+        } catch (stateErr) {
+          console.warn(`[evolution-manager] connectionState check failed: ${stateErr.message}`);
+        }
+        await registerWebhook();
       }
 
       if (needsCreate) {
