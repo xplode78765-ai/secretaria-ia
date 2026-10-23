@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { notifyStudioStaff } from "../_shared/staff-alert.ts";
 
 const DEFAULT_ORIGIN = "https://secretaria.app";
 
@@ -68,6 +69,14 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json();
+    if (body.action === "staff_alert") {
+      const text = String(body.text || "").trim().slice(0, 500);
+      if (text.length < 3) {
+        return new Response(JSON.stringify({ error: "Texto curto demais" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const ok = await notifyStudioStaff(supabase, userData.studio_id, text);
+      return new Response(JSON.stringify({ ok }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const { conversation_id, content } = body;
 
     // Verify conversation belongs to this studio

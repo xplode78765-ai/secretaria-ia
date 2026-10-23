@@ -6,8 +6,9 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { toast } from 'sonner'
+import { formatHoursLabel, type StudioHours } from '@/lib/hours'
 
-type PublicStudio = { name: string; address: string; phone: string; instagram: string }
+type PublicStudio = { name: string; address: string; phone: string; instagram: string; hours?: StudioHours }
 type PublicProc = { id: string; name: string; price: number; duration: number }
 
 export function AgendarPage() {
@@ -60,9 +61,10 @@ export function AgendarPage() {
           <p className="text-[10px] tracking-[0.2em] uppercase text-[var(--ink-400)]">Agendar</p>
           <h1 className="text-2xl font-serif font-medium">{studio.name}</h1>
           {studio.address && <p className="text-sm text-[var(--ink-500)] mt-1">{studio.address}</p>}
+          {studio.hours && <p className="text-xs text-[var(--ink-500)] mt-2">Atende {formatHoursLabel(studio.hours)}</p>}
         </div>
         {done ? (
-          <p className="text-sm text-[var(--success-700)]">Pedido enviado! O studio confirma em breve pelo WhatsApp.</p>
+          <p className="text-sm text-[var(--success-700)]">Pedido registrado. Se o WhatsApp do studio estiver conectado, você recebe uma mensagem neste número. A equipe também foi avisada e confirma o horário.</p>
         ) : (
           <>
             <div className="space-y-1.5"><Label>Seu nome *</Label><Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></div>

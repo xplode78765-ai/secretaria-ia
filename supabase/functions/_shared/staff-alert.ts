@@ -35,8 +35,28 @@ export async function notifyStudioStaff(
   const dest = normalizePhone(
     studio?.staff_whatsapp || connection.phone_number || studio?.whatsapp_number || "",
   );
-  if (dest.length < 12) return false;
+  return sendEvolutionText(connection, dest, text);
+}
 
+export async function notifyWhatsappNumber(
+  supabase: { from: (table: string) => any },
+  studioId: string,
+  rawNumber: string,
+  text: string,
+): Promise<boolean> {
+  const { data: connection } = await supabase
+    .from("evolution_api_connections")
+    .select("instance_name, evolution_api_key, evolution_api_url, phone_number, status")
+    .eq("studio_id", studioId)
+    .eq("status", "connected")
+    .maybeSingle();
+  if (!connection) return false;
+  return sendEvolutionText(connection, normalizePhone(rawNumber), text);
+}
+
+async function sendEvolutionText(connection: EvolutionConn, dest: string, text: string): Promise<boolean> {
+  if (!connection?.evolution_api_url || !connection.evolution_api_key || !connection.instance_name) return false;
+  if (dest.length < 12) return false;
   const res = await fetch(`${connection.evolution_api_url}/message/sendText/${connection.instance_name}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: connection.evolution_api_key },

@@ -71,7 +71,8 @@ Deno.serve(async (req: Request) => {
       }
       const name = body.user_name || me?.name || "oi";
       const studio = body.studio_name || "seu studio";
-      const appUrl = (await getAppSecret("allowed_origin")) || "https://secretaria-ia-studio-otpx.bolt.host";
+      const configured = (await getAppSecret("allowed_origin")) || "https://usesecretaria.netlify.app";
+      const appUrl = configured.split(",")[0].trim() || "https://usesecretaria.netlify.app";
       const html = wrapEmail(
         `Bem-vinda, ${name}`,
         `<p>Seu espaço na SecretarIA para <strong>${studio}</strong> já está pronto.</p>

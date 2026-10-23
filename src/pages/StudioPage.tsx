@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Store, Save, Phone, MapPin, Clock, CheckCircle2, Link2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { slugify } from '@/lib/slots'
+import { DEFAULT_HOURS, WEEKDAY_LABELS, parseStudioHours, type StudioHours } from '@/lib/hours'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,13 +18,18 @@ export function StudioPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [form, setForm] = useState({ name: '', phone: '', address: '', whatsapp_number: '', staff_whatsapp: '', instagram: '', slug: '' })
+  const [hours, setHours] = useState<StudioHours>(DEFAULT_HOURS)
 
   useEffect(() => { void loadStudio() }, [profile?.studio_id])
 
   const loadStudio = async () => {
     if (profile?.studio_id) {
       const { data } = await supabase.from('studios').select('*').eq('id', profile.studio_id).maybeSingle()
-      if (data) { setStudio(data as Studio); setForm({ name: data.name, phone: data.phone, address: data.address, whatsapp_number: data.whatsapp_number, staff_whatsapp: data.staff_whatsapp || '', instagram: data.instagram, slug: data.slug || '' }) }
+      if (data) {
+        setStudio(data as Studio)
+        setForm({ name: data.name, phone: data.phone, address: data.address, whatsapp_number: data.whatsapp_number, staff_whatsapp: data.staff_whatsapp || '', instagram: data.instagram, slug: data.slug || '' })
+        setHours(parseStudioHours(data.business_hours))
+      }
     }
     setLoading(false)
   }
@@ -32,7 +38,7 @@ export function StudioPage() {
     setSaving(true)
     if (profile?.studio_id) {
       const slug = slugify(form.slug || form.name)
-      const { error } = await supabase.from('studios').update({ ...form, slug }).eq('id', profile.studio_id)
+      const { error } = await supabase.from('studios').update({ ...form, slug, business_hours: hours }).eq('id', profile.studio_id)
       if (error) { toast.error(error.message); setSaving(false); return }
       setForm((f) => ({ ...f, slug }))
     }
@@ -64,6 +70,32 @@ export function StudioPage() {
           </div>
           <div className="space-y-1.5"><Label className="flex items-center gap-1.5"><MapPin className="size-3.5" />Endereço</Label><Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Rua das Flores, 123" /></div>
           <div className="space-y-1.5"><Label className="flex items-center gap-1.5"><Clock className="size-3.5" />Instagram</Label><Input value={form.instagram} onChange={e => setForm(f => ({ ...f, instagram: e.target.value }))} placeholder="@studio" /></div>
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5"><Clock className="size-3.5" />Expediente do link público</Label>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5"><Label className="text-xs text-[var(--ink-500)]">Abre</Label><Input type="time" value={hours.open} onChange={e => setHours((h) => ({ ...h, open: e.target.value || DEFAULT_HOURS.open }))} /></div>
+              <div className="space-y-1.5"><Label className="text-xs text-[var(--ink-500)]">Fecha</Label><Input type="time" value={hours.close} onChange={e => setHours((h) => ({ ...h, close: e.target.value || DEFAULT_HOURS.close }))} /></div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {WEEKDAY_LABELS.map((label, day) => {
+                const on = hours.weekdays.includes(day)
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    className={`px-3 py-1.5 rounded-full text-xs border ${on ? 'bg-[var(--gold)] text-[var(--ink-900)] border-transparent' : 'border-[var(--ink-200)] text-[var(--ink-500)]'}`}
+                    onClick={() => setHours((h) => {
+                      if (on && h.weekdays.length === 1) return h
+                      return { ...h, weekdays: on ? h.weekdays.filter((d) => d !== day) : [...h.weekdays, day].sort((a, b) => a - b) }
+                    })}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-[var(--ink-500)]">O link de agendamento só aceita horários dentro desses dias. Se nada estiver salvo, vale segunda a sábado, 9h às 19h.</p>
+          </div>
           <div className="space-y-1.5">
             <Label className="flex items-center gap-1.5"><Link2 className="size-3.5" />Link público</Label>
             <Input value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} placeholder="meu-studio" />

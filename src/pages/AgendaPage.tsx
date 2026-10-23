@@ -103,6 +103,19 @@ export function AgendaPage() {
       aptId = result.data?.id
     }
     if (result.error) { toast.error('Erro ao salvar: ' + result.error.message); setSaving(false); return }
+    const clientName = clients.find((c) => c.id === form.client_id)?.name || 'Sem cliente'
+    const whenLabel = format(startLocal, "dd/MM/yyyy HH:mm")
+    const verb = !editApt ? 'Novo agendamento (agenda)' : form.status === 'cancelled' ? 'Cancelamento (agenda)' : 'Horário alterado (agenda)'
+    void supabase.from('notifications').insert({
+      studio_id: profile.studio_id,
+      client_id: form.client_id || null,
+      type: form.status === 'cancelled' ? 'appointment_cancelled' : 'new_appointment',
+      title: verb,
+      content: `${clientName} — ${form.title || 'Agendamento'} em ${whenLabel}`,
+    })
+    void supabase.functions.invoke('whatsapp-send', {
+      body: { action: 'staff_alert', text: `📅 ${verb}\n${clientName} — ${form.title || 'Agendamento'}\n${whenLabel}` },
+    })
     if (form.status === 'done' && (parseFloat(form.price) || 0) > 0) {
       let commission = 0
       if (form.professional_id) {

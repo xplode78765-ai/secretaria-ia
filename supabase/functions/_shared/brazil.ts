@@ -69,6 +69,48 @@ export function formatSaoPaulo(d: Date): string {
   return d.toLocaleString("pt-BR", { timeZone: SP_TZ });
 }
 
+export type StudioHours = { open: string; close: string; weekdays: number[] };
+
+export const DEFAULT_HOURS: StudioHours = { open: "09:00", close: "19:00", weekdays: [1, 2, 3, 4, 5, 6] };
+
+export function parseStudioHours(raw: unknown): StudioHours {
+  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const open = typeof obj.open === "string" && /^\d{2}:\d{2}$/.test(obj.open) ? obj.open : DEFAULT_HOURS.open;
+  const close = typeof obj.close === "string" && /^\d{2}:\d{2}$/.test(obj.close) ? obj.close : DEFAULT_HOURS.close;
+  const weekdays = Array.isArray(obj.weekdays)
+    ? [...new Set(obj.weekdays.map(Number).filter((n) => n >= 0 && n <= 6))]
+    : DEFAULT_HOURS.weekdays;
+  return { open, close, weekdays: weekdays.length ? weekdays : DEFAULT_HOURS.weekdays };
+}
+
+export function saoPauloClock(at: Date): { weekday: number; minutes: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SP_TZ,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(at);
+  const wd = parts.find((p) => p.type === "weekday")?.value || "Sun";
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const hour = Number(parts.find((p) => p.type === "hour")?.value || "0");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value || "0");
+  return { weekday: map[wd] ?? 0, minutes: hour * 60 + minute };
+}
+
+export function outsideStudioHours(start: Date, end: Date, raw: unknown): string | null {
+  const hours = parseStudioHours(raw);
+  const clock = saoPauloClock(start);
+  const endClock = saoPauloClock(end);
+  if (!hours.weekdays.includes(clock.weekday)) return "O studio não atende neste dia.";
+  const [oh, om] = hours.open.split(":").map(Number);
+  const [ch, cm] = hours.close.split(":").map(Number);
+  if (clock.minutes < oh * 60 + om || endClock.minutes > ch * 60 + cm || endClock.weekday !== clock.weekday) {
+    return `Escolha um horário dentro do expediente (${hours.open}–${hours.close}).`;
+  }
+  return null;
+}
+
 export function parseNaiveAsSaoPaulo(value: string): Date {
   const v = String(value || "").trim();
   if (!v) return new Date(NaN);

@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { formatSaoPaulo, normalizePhone, parseNaiveAsSaoPaulo, phoneLookupValues, saoPauloYmd } from "../_shared/brazil.ts";
-import { notifyStudioStaff } from "../_shared/staff-alert.ts";
+import { formatSaoPaulo, normalizePhone, outsideStudioHours, parseNaiveAsSaoPaulo, parseStudioHours, phoneLookupValues, saoPauloYmd } from "../_shared/brazil.ts";
+import { notifyStudioStaff, notifyWhatsappNumber } from "../_shared/staff-alert.ts";
 
 const DEFAULT_ORIGIN = "https://secretaria.app";
 
@@ -53,12 +53,16 @@ Deno.serve(async (req: Request) => {
     const slug = url.searchParams.get("slug") || "";
 
     if (req.method === "GET") {
-      const { data: studio } = await supabase.from("studios").select("id, name, slug, address, phone, instagram").eq("slug", slug).maybeSingle();
+      const { data: studio } = await supabase.from("studios").select("id, name, slug, address, phone, instagram, business_hours").eq("slug", slug).maybeSingle();
       if (!studio) {
         return new Response(JSON.stringify({ error: "Studio não encontrado" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       const { data: procedures } = await supabase.from("procedures").select("id, name, price, duration").eq("studio_id", studio.id).eq("active", true).order("name");
-      return new Response(JSON.stringify({ studio, procedures: procedures || [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const hours = parseStudioHours(studio.business_hours);
+      return new Response(JSON.stringify({
+        studio: { name: studio.name, address: studio.address, phone: studio.phone, instagram: studio.instagram, hours },
+        procedures: procedures || [],
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (req.method !== "POST") {
@@ -66,7 +70,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json();
-    const { data: studio } = await supabase.from("studios").select("id, name, slug").eq("slug", body.slug || slug).maybeSingle();
+    const { data: studio } = await supabase.from("studios").select("id, name, slug, business_hours").eq("slug", body.slug || slug).maybeSingle();
     if (!studio) {
       return new Response(JSON.stringify({ error: "Studio não encontrado" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -96,6 +100,10 @@ Deno.serve(async (req: Request) => {
       : { data: null };
     const duration = Number(proc?.duration || body.duration || 60);
     const end = new Date(start.getTime() + duration * 60 * 1000);
+    const hoursMsg = outsideStudioHours(start, end, studio.business_hours);
+    if (hoursMsg) {
+      return new Response(JSON.stringify({ error: hoursMsg }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     const { data: openSlots } = await supabase.from("appointments")
       .select("id, professional_id")
@@ -162,6 +170,12 @@ Deno.serve(async (req: Request) => {
       supabase,
       studio.id,
       `📅 Novo agendamento (link público)\n${name} — ${title}\n${formatSaoPaulo(start)}`,
+    );
+    void notifyWhatsappNumber(
+      supabase,
+      studio.id,
+      phone,
+      `Recebemos seu pedido de ${title} para ${formatSaoPaulo(start)}. O studio confirma em breve.`,
     );
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
