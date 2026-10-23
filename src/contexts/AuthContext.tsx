@@ -12,7 +12,7 @@ type AuthContextType = {
   signUp: (email: string, password: string, studioName: string, userName: string) => Promise<{ error: string | null; needsEmailConfirmation?: boolean; profile: UserProfile | null }>
   signOut: () => Promise<void>
   resetPassword: (email: string) => Promise<{ error: string | null }>
-  refreshProfile: () => Promise<void>
+  refreshProfile: (uid?: string) => Promise<UserProfile | null>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
