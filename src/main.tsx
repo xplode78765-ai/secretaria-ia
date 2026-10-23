@@ -6,6 +6,9 @@ import App from "./App.tsx"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { AuthProvider } from "@/contexts/AuthContext"
 import { Toaster } from "@/components/ui/sonner"
+import { captureAuthRedirect } from "@/lib/auth-nav"
+
+captureAuthRedirect()
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

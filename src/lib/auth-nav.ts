@@ -27,19 +27,36 @@ export function clearPasswordRecovery() {
 }
 
 export function urlLooksLikeRecovery() {
+  const path = window.location.pathname
+  if (path === '/login' || path === '/cadastro') return false
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const params = new URLSearchParams(window.location.search)
-  return hashParams.get('type') === 'recovery' || params.get('type') === 'recovery'
+  if (hashParams.get('type') === 'recovery' || params.get('type') === 'recovery') return true
+  if (path === '/recuperar-senha' && (params.has('code') || hashParams.has('access_token'))) return true
+  if ((path === '/' || path === '') && params.has('code')) return true
+  return false
+}
+
+export function captureAuthRedirect() {
+  if (urlLooksLikeRecovery()) markPasswordRecovery()
 }
 
 export function isPasswordRecovery() {
-  if (urlLooksLikeRecovery()) {
-    markPasswordRecovery()
-    return true
-  }
+  captureAuthRedirect()
   try {
     return sessionStorage.getItem(RECOVERY_FLAG) === '1'
   } catch {
-    return false
+    return urlLooksLikeRecovery()
   }
+}
+
+export function resetPasswordErrorMessage(message: string) {
+  const lower = message.toLowerCase()
+  if (lower.includes('rate') || lower.includes('429')) {
+    return 'Aguarde cerca de 1 minuto e tente de novo. O e-mail pode já ter chegado.'
+  }
+  if (lower.includes('redirect')) {
+    return 'O Auth do Supabase ainda não aceita este domínio. Inclua https://usesecretaria.netlify.app/** nas Redirect URLs.'
+  }
+  return message || 'Não foi possível enviar o e-mail. Tente novamente.'
 }

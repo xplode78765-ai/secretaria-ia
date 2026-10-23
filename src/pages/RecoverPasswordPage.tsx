@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
-import { clearPasswordRecovery, isPasswordRecovery, markPasswordRecovery } from '@/lib/auth-nav'
+import { clearPasswordRecovery, isPasswordRecovery, markPasswordRecovery, resetPasswordErrorMessage } from '@/lib/auth-nav'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,7 +10,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { CheckCircle2 } from 'lucide-react'
 
 export function RecoverPasswordPage() {
-  const { resetPassword } = useAuth()
+  const { resetPassword, user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
@@ -41,7 +41,7 @@ export function RecoverPasswordPage() {
     setLoading(true)
     const { error } = await resetPassword(email)
     if (error) {
-      setError('Não foi possível enviar o e-mail. Verifique o endereço.')
+      setError(resetPasswordErrorMessage(error))
       setLoading(false)
     } else {
       setSent(true)
@@ -90,6 +90,25 @@ export function RecoverPasswordPage() {
 
         <div className="luxury-card p-8">
           {isRecovery ? (
+            authLoading ? (
+            <>
+              <div className="mb-6">
+                <h2 className="text-xl font-serif font-medium">Validando link</h2>
+                <p className="text-sm text-[var(--ink-500)] mt-1">Aguarde um instante…</p>
+              </div>
+              <div className="flex justify-center py-6"><Spinner className="size-6 text-[var(--gold)]" /></div>
+            </>
+            ) : !user ? (
+            <>
+              <div className="mb-6">
+                <h2 className="text-xl font-serif font-medium">Link inválido</h2>
+                <p className="text-sm text-[var(--ink-500)] mt-1">O link expirou ou já foi usado. Solicite outro.</p>
+              </div>
+              <Button type="button" className="w-full h-11 btn-gold" onClick={() => { clearPasswordRecovery(); setIsRecovery(false) }}>
+                Pedir novo link
+              </Button>
+            </>
+            ) : (
             <>
               <div className="mb-6">
                 <h2 className="text-xl font-serif font-medium">Nova senha</h2>
@@ -111,6 +130,7 @@ export function RecoverPasswordPage() {
                 </Button>
               </form>
             </>
+            )
           ) : sent ? (
             <div className="text-center py-4">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[var(--success-50)] border border-[var(--success-100)] mb-4">
