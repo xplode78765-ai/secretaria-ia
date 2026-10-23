@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useNavigate } from 'react-router-dom'
-import { Shield, Building2, Users, DollarSign, CalendarDays, LogOut } from 'lucide-react'
+import { Shield, Building2, Users, DollarSign, CalendarDays, LogOut, Mail } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
+import { toast } from 'sonner'
 
 type OverviewData = {
   totalStudios: number
@@ -18,6 +21,9 @@ export function AdminDashboardPage() {
   const [data, setData] = useState<OverviewData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [subject, setSubject] = useState('')
+  const [message, setMessage] = useState('')
+  const [sending, setSending] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -52,6 +58,21 @@ export function AdminDashboardPage() {
 
   const handleSignOut = async () => { await supabase.auth.signOut(); navigate('/admin') }
 
+  const sendMail = async (action: 'test' | 'broadcast') => {
+    setSending(true)
+    const { data: json, error: fnError } = await supabase.functions.invoke('mailer', {
+      body: action === 'test' ? { action: 'test' } : { action: 'broadcast', subject, message },
+    })
+    setSending(false)
+    if (fnError) { toast.error(fnError.message); return }
+    if (json?.error) { toast.error(json.error); return }
+    if (action === 'test') toast.success(`Teste enviado para ${json?.to || 'seu e-mail'}`)
+    else {
+      toast.success(`Enviado para ${json?.sent ?? 0} de ${json?.total ?? 0}`)
+      if (json?.errors?.length) toast.error(json.errors[0])
+    }
+  }
+
   if (loading) return <div className="flex justify-center p-12"><Spinner className="text-[var(--gold)]" /></div>
   if (error) return <div className="flex justify-center p-12 text-red-500 text-sm">{error}</div>
 
@@ -80,6 +101,20 @@ export function AdminDashboardPage() {
               <p className="text-2xl font-serif font-medium gold-gradient-text">{c.value}</p>
             </div>
           ))}
+        </div>
+
+        <div className="luxury-card p-6 space-y-4">
+          <div className="flex items-center gap-2"><Mail className="size-4 text-[var(--gold)]" /><h2 className="font-serif font-medium text-lg">E-mail (Resend)</h2></div>
+          <p className="text-xs text-[var(--ink-500)]">Promoção, aviso e novidade para as donas cadastradas. Configure <code>resend_api_key</code> e <code>resend_from</code> no Supabase.</p>
+          <div className="space-y-1.5"><Label>Assunto</Label><Input value={subject} onChange={e => setSubject(e.target.value)} placeholder="Plano anual com 2 meses off" /></div>
+          <div className="space-y-1.5">
+            <Label>Mensagem</Label>
+            <textarea className="w-full min-h-28 rounded-md border border-[var(--ink-200)] bg-transparent px-3 py-2 text-sm" value={message} onChange={e => setMessage(e.target.value)} placeholder="Oi! Essa semana o plano anual sai com desconto..." />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" disabled={sending} onClick={() => void sendMail('test')}>{sending ? <Spinner className="size-4" /> : null}Enviar teste para mim</Button>
+            <Button className="btn-gold" disabled={sending} onClick={() => void sendMail('broadcast')}>{sending ? <Spinner className="size-4" /> : <Mail className="size-4" />}Enviar para todas as donas</Button>
+          </div>
         </div>
 
         <div className="luxury-card overflow-hidden">

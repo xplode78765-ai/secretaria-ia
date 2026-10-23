@@ -25,3 +25,7 @@ entrypoint = "./functions/public-booking/index.ts"
 [functions.studio-team]
 verify_jwt = true
 entrypoint = "./functions/studio-team/index.ts"
+
+[functions.mailer]
+verify_jwt = true
+entrypoint = "./functions/mailer/index.ts"

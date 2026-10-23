@@ -67,6 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       p_studio_name: meta.studio_name,
       p_user_name: userName,
     })
+    if (!error) {
+      void supabase.functions.invoke('mailer', { body: { action: 'welcome', studio_name: meta.studio_name, user_name: userName } })
+    }
     return error
   }
 
@@ -122,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       if (rpcError) return { error: 'Falha ao configurar o estúdio: ' + rpcError.message, profile: null }
 
+      void supabase.functions.invoke('mailer', { body: { action: 'welcome', studio_name: studioName, user_name: userName } })
       const next = await loadProfile(data.user.id)
       return { error: null, profile: next }
     } finally {
