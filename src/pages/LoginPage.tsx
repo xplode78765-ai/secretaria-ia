@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { postAuthPath } from '@/lib/auth-nav'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,8 @@ import { Spinner } from '@/components/ui/spinner'
 export function LoginPage() {
   const { signIn } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const passwordUpdated = Boolean((location.state as { passwordUpdated?: boolean } | null)?.passwordUpdated)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -50,6 +52,11 @@ export function LoginPage() {
           <div className="mb-6">
             <h2 className="text-xl font-serif font-medium">Acesse sua conta</h2>
             <p className="text-sm text-[var(--ink-500)] mt-1">Bem-vinda de volta ao seu studio</p>
+            {passwordUpdated && (
+              <p className="text-sm text-[var(--success)] bg-[var(--success-50)] border border-[var(--success-100)] rounded-lg px-3 py-2 mt-3">
+                Senha atualizada. Entre com a nova senha.
+              </p>
+            )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">

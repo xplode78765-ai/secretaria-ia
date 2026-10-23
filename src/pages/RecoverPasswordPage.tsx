@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { clearPasswordRecovery, isPasswordRecovery, markPasswordRecovery } from '@/lib/auth-nav'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,17 +17,20 @@ export function RecoverPasswordPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [newPassword, setNewPassword] = useState('')
-  const [isRecovery, setIsRecovery] = useState(false)
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isRecovery, setIsRecovery] = useState(() => (typeof window !== 'undefined' ? isPasswordRecovery() : false))
   const [updating, setUpdating] = useState(false)
 
   useEffect(() => {
-    const hash = window.location.hash
-    const search = window.location.search
-    if (hash.includes('type=recovery') || hash.includes('PASSWORD_RECOVERY') || search.includes('type=recovery')) {
+    if (isPasswordRecovery()) {
+      markPasswordRecovery()
       setIsRecovery(true)
     }
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') setIsRecovery(true)
+      if (event === 'PASSWORD_RECOVERY') {
+        markPasswordRecovery()
+        setIsRecovery(true)
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -52,14 +56,20 @@ export function RecoverPasswordPage() {
       setError('A senha deve ter no mínimo 6 caracteres.')
       return
     }
+    if (newPassword !== confirmPassword) {
+      setError('As senhas não coincidem.')
+      return
+    }
     setUpdating(true)
     const { error } = await supabase.auth.updateUser({ password: newPassword })
     if (error) {
-      setError('Não foi possível atualizar a senha. Tente novamente.')
+      setError('Não foi possível atualizar a senha. O link pode ter expirado. Solicite outro.')
       setUpdating(false)
-    } else {
-      navigate('/app')
+      return
     }
+    clearPasswordRecovery()
+    await supabase.auth.signOut()
+    navigate('/login', { replace: true, state: { passwordUpdated: true } })
   }
 
   return (
@@ -88,7 +98,11 @@ export function RecoverPasswordPage() {
               <form onSubmit={handleUpdate} className="space-y-5">
                 <div className="space-y-1.5">
                   <Label className="text-sm">Nova senha</Label>
-                  <Input type="password" placeholder="Mínimo 6 caracteres" value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="h-11" />
+                  <Input type="password" placeholder="Mínimo 6 caracteres" value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="h-11" autoComplete="new-password" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm">Confirmar senha</Label>
+                  <Input type="password" placeholder="Repita a nova senha" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required className="h-11" autoComplete="new-password" />
                 </div>
                 {error && <p className="text-sm text-[var(--danger)] bg-[var(--danger-50)] border border-[var(--danger-100)] rounded-lg px-3 py-2">{error}</p>}
                 <Button type="submit" className="w-full h-11 btn-gold" disabled={updating}>
@@ -103,7 +117,7 @@ export function RecoverPasswordPage() {
                 <CheckCircle2 className="size-6 text-[var(--success)]" />
               </div>
               <h2 className="text-xl font-serif font-medium mb-2">E-mail enviado</h2>
-              <p className="text-sm text-[var(--ink-500)] mb-6">Verifique sua caixa de entrada e siga o link para redefinir sua senha.</p>
+              <p className="text-sm text-[var(--ink-500)] mb-6">Verifique sua caixa de entrada (e o spam) e abra o link para definir a nova senha. O link vale por alguns minutos.</p>
               <Link to="/login">
                 <Button variant="outline" className="w-full">Voltar para o login</Button>
               </Link>
@@ -117,7 +131,7 @@ export function RecoverPasswordPage() {
               <form onSubmit={handleRequest} className="space-y-5">
                 <div className="space-y-1.5">
                   <Label className="text-sm">E-mail</Label>
-                  <Input type="email" placeholder="seu@email.com" value={email} onChange={e => setEmail(e.target.value)} required className="h-11" />
+                  <Input type="email" placeholder="seu@email.com" value={email} onChange={e => setEmail(e.target.value)} required className="h-11" autoComplete="email" />
                 </div>
                 {error && <p className="text-sm text-[var(--danger)] bg-[var(--danger-50)] border border-[var(--danger-100)] rounded-lg px-3 py-2">{error}</p>}
                 <Button type="submit" className="w-full h-11 btn-gold" disabled={loading}>

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { UserProfile } from '@/lib/supabase'
+import { markPasswordRecovery } from '@/lib/auth-nav'
 
 type AuthContextType = {
   user: User | null
@@ -41,7 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!session) setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') markPasswordRecovery()
       setSession(session)
       setUser(session?.user ?? null)
       if (!session) {
