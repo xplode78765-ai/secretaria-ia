@@ -53,7 +53,7 @@ export function isPasswordRecovery() {
 export function resetPasswordErrorMessage(message: string) {
   const lower = message.toLowerCase()
   if (lower.includes('rate') || lower.includes('429')) {
-    return 'Aguarde cerca de 1 minuto e tente de novo. O e-mail pode já ter chegado.'
+    return 'O e-mail nativo do Supabase já atingiu o limite (poucos envios por hora). Não peça outro agora — abra o último e-mail que chegou. Isso some quando o Resend estiver ligado.'
   }
   if (lower.includes('redirect')) {
     return 'O Auth do Supabase ainda não aceita este domínio. Inclua https://usesecretaria.netlify.app/** nas Redirect URLs.'
