@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
+import { MFA_REQUIRED_ERROR, tokenAal } from "../_shared/jwt.ts";
 
-const DEFAULT_ORIGIN = "https://secretaria.app";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -15,28 +16,13 @@ async function getAppSecret(key: string): Promise<string | null> {
   return value && value.length > 0 ? value : null;
 }
 
-function originAllowed(origin: string, allowlist: string[]): boolean {
-  if (!origin) return false;
-  if (allowlist.includes("*") || allowlist.includes(origin)) return true;
-  try {
-    const host = new URL(origin).hostname;
-    if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
-  } catch {
-    return false;
-  }
-  return false;
-}
 
 async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
   const configured = await getAppSecret("allowed_origin");
-  const allowlist = (configured || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (!allowlist.includes(DEFAULT_ORIGIN)) allowlist.push(DEFAULT_ORIGIN);
+  const allowlist = (configured || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const allowLocalhost = (await getAppSecret("cors_allow_localhost")) === "true";
   const requestOrigin = req.headers.get("Origin") || "";
-  const origin = originAllowed(requestOrigin, allowlist) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
+  const origin = originAllowed(requestOrigin, allowlist, allowLocalhost) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -74,6 +60,11 @@ Deno.serve(async (req: Request) => {
         description: "Attempted to access admin panel without super admin privileges",
       });
       return new Response(JSON.stringify({ error: "Access denied" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Platform admin data (every studio) requires the second factor in this session.
+    if (tokenAal(token) !== "aal2") {
+      return new Response(JSON.stringify({ error: MFA_REQUIRED_ERROR }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // Log admin access
@@ -128,8 +119,46 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ studio, clients, appointments: apts, payments }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+    if (action === "plans") {
+      const { data: plans } = await supabase.from("plans").select("*").order("sort");
+      return json({ plans: plans || [] });
+    }
+
+    if (action === "plan-update") {
+      const id = String(body.id || "");
+      const price = Math.round(Number(body.price_cents));
+      const limitRaw = body.ai_messages_month;
+      const limit = limitRaw === null || limitRaw === "" || limitRaw === undefined ? null : Math.round(Number(limitRaw));
+      if (!id || !Number.isFinite(price) || price < 0 || price > 10_000_00 || (limit !== null && (!Number.isFinite(limit) || limit < 0))) {
+        return json({ error: "Valores inválidos" }, 400);
+      }
+      const { error: upErr } = await supabase.from("plans").update({ price_cents: price, ai_messages_month: limit, updated_at: new Date().toISOString() }).eq("id", id);
+      if (upErr) return json({ error: "Não foi possível salvar o plano" }, 500);
+      await supabase.from("activity_logs").insert({ user_id: user.id, action: "plan_updated", entity_type: "billing", description: `${id}: R$ ${(price / 100).toFixed(2)}, limite ${limit ?? "ilimitado"}` });
+      return json({ ok: true });
+    }
+
+    if (action === "studio-subscription") {
+      const studioId = String(body.studio_id || "");
+      const patch: Record<string, unknown> = {};
+      if (["essencial", "studio", "pro"].includes(body.plan)) patch.plan = body.plan;
+      if (["trialing", "active", "past_due", "paused", "cancelled"].includes(body.status)) {
+        patch.subscription_status = body.status;
+        if (body.status === "active") { patch.past_due_since = null; }
+        if (body.status === "trialing") { patch.trial_ends_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); patch.past_due_since = null; }
+      }
+      if (!studioId || Object.keys(patch).length === 0) return json({ error: "Nada para alterar" }, 400);
+      const { error: upErr } = await supabase.from("studios").update(patch).eq("id", studioId);
+      if (upErr) return json({ error: "Não foi possível alterar a assinatura" }, 500);
+      await supabase.from("activity_logs").insert({ studio_id: studioId, user_id: user.id, action: "subscription_changed_by_admin", entity_type: "billing", description: JSON.stringify(patch).slice(0, 200) });
+      return json({ ok: true });
+    }
+
     return new Response(JSON.stringify({ error: "Invalid action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("[admin-panel] unhandled", err);
+    return new Response(JSON.stringify({ error: "Erro interno. Tente novamente." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

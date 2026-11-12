@@ -29,3 +29,11 @@ entrypoint = "./functions/studio-team/index.ts"
 [functions.mailer]
 verify_jwt = true
 entrypoint = "./functions/mailer/index.ts"
+
+[functions.billing]
+verify_jwt = true
+entrypoint = "./functions/billing/index.ts"
+
+[functions.asaas-webhook]
+verify_jwt = false
+entrypoint = "./functions/asaas-webhook/index.ts"

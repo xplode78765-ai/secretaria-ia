@@ -1,30 +1,37 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from '@/components/ui/chart'
 import { Spinner } from '@/components/ui/spinner'
 import { TrendingUp, Users, CalendarDays, DollarSign } from 'lucide-react'
+import { fromStudioClock, nowInStudio, useStudioTz } from '@/lib/timezone'
+import { useT } from '@/i18n'
+import { useI18n } from '@/i18n'
 
 export function RelatoriosPage() {
+  const tc = useT('common')
+  const t = useT('reports')
+  const tz = useStudioTz()
+  const { lang, dateLocale } = useI18n()
   const [loading, setLoading] = useState(true)
   const [monthlyData, setMonthlyData] = useState<{ month: string; revenue: number; appointments: number }[]>([])
   const [statusData, setStatusData] = useState<{ name: string; value: number; fill: string }[]>([])
   const [summary, setSummary] = useState({ totalRevenue: 0, totalApts: 0, totalClients: 0, avgTicket: 0 })
 
-  useEffect(() => { loadReport() }, [])
+  // Re-run when the language changes: month names and status labels are built here.
+  useEffect(() => { loadReport() }, [lang])
 
   const loadReport = async () => {
-    const months = Array.from({ length: 6 }, (_, i) => subMonths(new Date(), i))
+    const months = Array.from({ length: 6 }, (_, i) => subMonths(nowInStudio(tz), i))
     const monthly: { month: string; revenue: number; appointments: number }[] = []
     for (const m of months) {
-      const start = startOfMonth(m).toISOString()
-      const end = endOfMonth(m).toISOString()
+      const start = fromStudioClock(startOfMonth(m), tz).toISOString()
+      const end = fromStudioClock(endOfMonth(m), tz).toISOString()
       const { data: apts } = await supabase.from('appointments').select('price, status').gte('start_time', start).lte('start_time', end)
       const doneApts = (apts ?? []).filter(a => a.status === 'done')
       const revenue = doneApts.reduce((acc, a) => acc + (a.price ?? 0), 0)
-      monthly.push({ month: format(m, 'MMM', { locale: ptBR }), revenue, appointments: doneApts.length })
+      monthly.push({ month: format(m, 'MMM', { locale: dateLocale }), revenue, appointments: doneApts.length })
     }
     monthly.reverse()
     setMonthlyData(monthly)
@@ -33,7 +40,7 @@ export function RelatoriosPage() {
     const statusCount: Record<string, number> = {}
     for (const a of allApts ?? []) statusCount[a.status] = (statusCount[a.status] ?? 0) + 1
     const colors: Record<string, string> = { pending: '#D97706', confirmed: '#16A34A', done: '#3B82F6', cancelled: '#DC2626' }
-    const labels: Record<string, string> = { pending: 'Pendente', confirmed: 'Confirmado', done: 'Realizado', cancelled: 'Cancelado' }
+    const labels: Record<string, string> = { pending: tc('statusPending'), confirmed: tc('statusConfirmed'), done: tc('statusDone'), cancelled: tc('statusCancelled') }
     setStatusData(Object.entries(statusCount).map(([k, v]) => ({ name: labels[k] ?? k, value: v, fill: colors[k] ?? '#888' })))
 
     const { count: clientCount } = await supabase.from('clients').select('id', { count: 'exact', head: true })
@@ -43,20 +50,20 @@ export function RelatoriosPage() {
     setLoading(false)
   }
 
-  const chartConfig = { revenue: { label: 'Faturamento', color: '#D4AF37' }, appointments: { label: 'Agendamentos', color: '#C5A059' } }
+  const chartConfig = { revenue: { label: t('revenue'), color: '#D4AF37' }, appointments: { label: t('appointments'), color: '#C5A059' } }
 
   if (loading) return <div className="flex justify-center p-12"><Spinner className="text-[var(--gold)]" /></div>
 
   const cards = [
-    { title: 'Faturamento Total', value: `R$ ${summary.totalRevenue.toFixed(2)}`, icon: DollarSign, gold: true },
-    { title: 'Agendamentos', value: summary.totalApts, icon: CalendarDays },
-    { title: 'Clientes', value: summary.totalClients, icon: Users },
-    { title: 'Ticket Médio', value: `R$ ${summary.avgTicket.toFixed(2)}`, icon: TrendingUp },
+    { title: t('totalRevenue'), value: `R$ ${summary.totalRevenue.toFixed(2)}`, icon: DollarSign, gold: true },
+    { title: t('appointments'), value: summary.totalApts, icon: CalendarDays },
+    { title: t('clients'), value: summary.totalClients, icon: Users },
+    { title: t('avgTicket'), value: `R$ ${summary.avgTicket.toFixed(2)}`, icon: TrendingUp },
   ]
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div><h1 className="text-2xl font-serif font-medium">Relatórios</h1><p className="text-sm text-[var(--ink-500)] mt-0.5">Análise dos últimos 6 meses</p></div>
+      <div><h1 className="text-2xl font-serif font-medium">{t('title')}</h1><p className="text-sm text-[var(--ink-500)] mt-0.5">{t('subtitle')}</p></div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {cards.map((c, i) => (
@@ -69,20 +76,20 @@ export function RelatoriosPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="luxury-card p-6">
-          <h2 className="font-serif font-medium text-lg mb-4">Faturamento Mensal</h2>
+          <h2 className="font-serif font-medium text-lg mb-4">{t('monthlyRevenue')}</h2>
           <ChartContainer config={chartConfig} className="min-h-[250px] w-full">
             <BarChart data={monthlyData} accessibilityLayer>
               <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#E8E8E8" />
               <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#888888' }} />
               <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#888888' }} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[4, 4, 0, 0]} name="Faturamento" />
+              <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[4, 4, 0, 0]} name={t('revenue')} />
             </BarChart>
           </ChartContainer>
         </div>
 
         <div className="luxury-card p-6">
-          <h2 className="font-serif font-medium text-lg mb-4">Status dos Agendamentos</h2>
+          <h2 className="font-serif font-medium text-lg mb-4">{t('statusChart')}</h2>
           {statusData.length > 0 ? (
             <ChartContainer config={{}} className="min-h-[250px] w-full">
               <PieChart>
@@ -93,7 +100,7 @@ export function RelatoriosPage() {
                 <ChartLegend content={<ChartLegendContent />} />
               </PieChart>
             </ChartContainer>
-          ) : <p className="text-sm text-[var(--ink-500)] text-center py-12">Sem dados</p>}
+          ) : <p className="text-sm text-[var(--ink-500)] text-center py-12">{t('noData')}</p>}
         </div>
       </div>
     </div>

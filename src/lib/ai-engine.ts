@@ -66,3 +66,32 @@ export const DEFAULT_AI_PATTERNS: AIPattern[] = [
   { id: 'p4', trigger: 'address', label: 'Endereço', keywords: ['endereco', 'endereço', 'onde fica', 'onde é', 'localização', 'localizacao'], response: 'Estamos localizados na Rua das Flores, 123. Te esperamos!', enabled: true },
   { id: 'p5', trigger: 'procedures', label: 'Procedimentos', keywords: ['procedimento', 'servico', 'serviço', 'tratamento', 'fazem o que', 'o que voces fazem'], response: 'Oferecemos botox, preenchimento, design de sobrancelhas e mais. Qual te interessa?', enabled: true },
 ]
+
+// Spanish defaults, for studios whose client language (studios.locale) is "es".
+export const DEFAULT_CUSTOM_MESSAGES_ES: CustomMessage[] = [
+  { id: 'greeting', trigger: 'greeting', label: 'Saludo', message: '¡Hola! Bienvenida a nuestro estudio. ¿En qué te puedo ayudar hoy?', enabled: true },
+  { id: 'pricing', trigger: 'pricing', label: 'Precios', message: 'Nuestros procedimientos tienen precios desde R$ 80. ¿Qué tratamiento te interesa?', enabled: true },
+  { id: 'scheduling', trigger: 'scheduling', label: 'Reservas', message: '¡Perfecto! Dime tu nombre completo y la fecha/hora que prefieres. Nuestro equipo confirma el turno en la agenda.', enabled: true },
+  { id: 'address', trigger: 'address', label: 'Dirección', message: 'Estamos en Calle de las Flores, 123. ¡Te esperamos!', enabled: true },
+  { id: 'procedures', trigger: 'procedures', label: 'Procedimientos', message: 'Ofrecemos bótox, rellenos, diseño de cejas y más. ¿Cuál te interesa?', enabled: true },
+  { id: 'hours', trigger: 'hours', label: 'Horarios', message: 'Atendemos de lunes a sábado, de 9 a 19 h.', enabled: true },
+  { id: 'thanks', trigger: 'thanks', label: 'Agradecimiento', message: '¡Muchas gracias por escribirnos! Nos encanta atenderte.', enabled: true },
+  { id: 'goodbye', trigger: 'goodbye', label: 'Despedida', message: '¡Hasta luego! Cualquier cosa, escríbenos por aquí.', enabled: true },
+  { id: 'confirm', trigger: 'confirm', label: 'Confirmación', message: 'Anoté tu pedido. Nuestro equipo confirma el turno en la agenda y te responde aquí.', enabled: true },
+  { id: 'cancel', trigger: 'cancel', label: 'Cancelación', message: 'Entendido. Paso tu pedido de cancelación al equipo para que lo confirme.', enabled: true },
+  { id: 'fallback', trigger: 'fallback', label: 'Respuesta estándar', message: '¡Gracias por tu mensaje! Nuestro equipo te responderá pronto.', enabled: true },
+]
+
+export const DEFAULT_AI_PATTERNS_ES: AIPattern[] = [
+  { id: 'p1', trigger: 'pricing', label: 'Precio', keywords: ['cuanto cuesta', 'cuánto cuesta', 'precio', 'cuanto sale', 'cuánto sale', 'valor'], response: 'Nuestros procedimientos tienen precios desde R$ 80. ¿Qué tratamiento te interesa?', enabled: true },
+  { id: 'p2', trigger: 'scheduling', label: 'Reservar', keywords: ['reservar', 'agendar', 'turno', 'una cita', 'sacar turno', 'pedir turno'], response: '¡Perfecto! Dime tu nombre completo y la fecha/hora que prefieres. Nuestro equipo confirma el turno en la agenda.', enabled: true },
+  { id: 'p3', trigger: 'hours', label: 'Horarios', keywords: ['horario', 'a que hora', 'a qué hora', 'abren', 'cierran', 'abierto'], response: 'Atendemos de lunes a sábado, de 9 a 19 h.', enabled: true },
+  { id: 'p4', trigger: 'address', label: 'Dirección', keywords: ['direccion', 'dirección', 'donde queda', 'dónde queda', 'donde estan', 'dónde están', 'ubicacion', 'ubicación'], response: 'Estamos en Calle de las Flores, 123. ¡Te esperamos!', enabled: true },
+  { id: 'p5', trigger: 'procedures', label: 'Procedimientos', keywords: ['procedimiento', 'servicio', 'tratamiento', 'que hacen', 'qué hacen'], response: 'Ofrecemos bótox, rellenos, diseño de cejas y más. ¿Cuál te interesa?', enabled: true },
+]
+
+export function defaultAiTemplates(locale: 'pt' | 'es') {
+  return locale === 'es'
+    ? { custom_messages: DEFAULT_CUSTOM_MESSAGES_ES, ai_patterns: DEFAULT_AI_PATTERNS_ES }
+    : { custom_messages: DEFAULT_CUSTOM_MESSAGES, ai_patterns: DEFAULT_AI_PATTERNS }
+}

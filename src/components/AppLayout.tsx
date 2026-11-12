@@ -5,7 +5,9 @@ import {
   LayoutDashboard, Bot, CalendarDays, Users, Scissors,
   Stethoscope, Zap, DollarSign, BarChart3, Store, Settings,
   LogOut, ChevronLeft, ChevronRight, Menu, MessageSquare, UserPlus,
+  type LucideIcon,
 } from 'lucide-react'
+import type { Dictionaries } from '@/i18n/dictionaries'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
@@ -13,24 +15,32 @@ import { cn } from '@/lib/utils'
 import { ModeToggle } from '@/components/mode-toggle'
 import { NotificationBell } from '@/components/NotificationBell'
 import { canAccessPath } from '@/lib/roles'
+import { SubscriptionBanner } from '@/components/SubscriptionBanner'
+import { SupportButton } from '@/components/SupportButton'
+import { useT } from '@/i18n'
+import { LanguageToggle } from '@/components/LanguageToggle'
 
-const navItems = [
-  { to: '/app', icon: LayoutDashboard, label: 'Dashboard', end: true, roles: ['owner', 'admin', 'reception', 'professional'] },
-  { to: '/app/agenda', icon: CalendarDays, label: 'Agenda', roles: ['owner', 'admin', 'reception', 'professional'] },
-  { to: '/app/conversas', icon: MessageSquare, label: 'Conversas', roles: ['owner', 'admin', 'reception', 'professional'] },
-  { to: '/app/clientes', icon: Users, label: 'Clientes', roles: ['owner', 'admin', 'reception', 'professional'] },
-  { to: '/app/procedimentos', icon: Scissors, label: 'Procedimentos', roles: ['owner', 'admin', 'reception'] },
-  { to: '/app/profissionais', icon: Stethoscope, label: 'Profissionais', roles: ['owner', 'admin', 'reception'] },
-  { to: '/app/secretaria-ia', icon: Bot, label: 'SecretarIA', roles: ['owner', 'admin'] },
-  { to: '/app/automacoes', icon: Zap, label: 'Automações', roles: ['owner', 'admin'] },
-  { to: '/app/financeiro', icon: DollarSign, label: 'Financeiro', roles: ['owner', 'admin', 'reception'] },
-  { to: '/app/relatorios', icon: BarChart3, label: 'Relatórios', roles: ['owner', 'admin'] },
-  { to: '/app/studio', icon: Store, label: 'Studio', roles: ['owner', 'admin'] },
-  { to: '/app/equipe', icon: UserPlus, label: 'Equipe', roles: ['owner', 'admin'] },
-  { to: '/app/configuracoes', icon: Settings, label: 'Configurações', roles: ['owner', 'admin'] },
+type NavItem = { to: string; icon: LucideIcon; label: keyof Dictionaries['pt']['layout']; end?: boolean; roles: string[] }
+
+const navItems: NavItem[] = [
+  { to: '/app', icon: LayoutDashboard, label: 'navDashboard', end: true, roles: ['owner', 'admin', 'reception', 'professional'] },
+  { to: '/app/agenda', icon: CalendarDays, label: 'navAgenda', roles: ['owner', 'admin', 'reception', 'professional'] },
+  { to: '/app/conversas', icon: MessageSquare, label: 'navConversations', roles: ['owner', 'admin', 'reception'] },
+  { to: '/app/clientes', icon: Users, label: 'navClients', roles: ['owner', 'admin', 'reception', 'professional'] },
+  { to: '/app/procedimentos', icon: Scissors, label: 'navProcedures', roles: ['owner', 'admin', 'reception'] },
+  { to: '/app/profissionais', icon: Stethoscope, label: 'navProfessionals', roles: ['owner', 'admin', 'reception'] },
+  { to: '/app/secretaria-ia', icon: Bot, label: 'navSecretary', roles: ['owner', 'admin'] },
+  { to: '/app/automacoes', icon: Zap, label: 'navAutomations', roles: ['owner', 'admin'] },
+  { to: '/app/financeiro', icon: DollarSign, label: 'navFinance', roles: ['owner', 'admin', 'reception'] },
+  { to: '/app/relatorios', icon: BarChart3, label: 'navReports', roles: ['owner', 'admin'] },
+  { to: '/app/studio', icon: Store, label: 'navStudio', roles: ['owner', 'admin'] },
+  { to: '/app/equipe', icon: UserPlus, label: 'navTeam', roles: ['owner', 'admin'] },
+  { to: '/app/configuracoes', icon: Settings, label: 'navSettings', roles: ['owner', 'admin'] },
 ]
 
 export function AppLayout() {
+  const tc = useT('common')
+  const t = useT('layout')
   const { user, profile, signOut } = useAuth()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
@@ -43,7 +53,7 @@ export function AppLayout() {
 
   const initials = (profile?.name || user?.email || 'S').slice(0, 2).toUpperCase()
   const role = profile?.role || 'owner'
-  const visibleNav = navItems.filter((item) => canAccessPath(role, item.to))
+  const visibleNav = navItems.filter((item) => canAccessPath(role, item.to, profile?.plan_features))
 
   return (
     <div className="flex min-h-screen bg-[var(--canvas)]">
@@ -64,7 +74,7 @@ export function AppLayout() {
           {!collapsed && (
             <div className="overflow-hidden">
               <p className="text-sm font-serif font-medium leading-tight truncate">SecretarIA</p>
-              <p className="text-[10px] text-[var(--ink-500)] tracking-[0.15em] uppercase">Estética &amp; Beleza</p>
+              <p className="text-[10px] text-[var(--ink-500)] tracking-[0.15em] uppercase">{tc('tagline')}</p>
             </div>
           )}
         </div>
@@ -83,12 +93,12 @@ export function AppLayout() {
                   : "text-[var(--ink-600)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-900)]",
                 collapsed && "justify-center px-2"
               )}
-              title={collapsed ? label : undefined}
+              title={collapsed ? t(label) : undefined}
             >
               {({ isActive }) => (
                 <>
                   <Icon className={cn("size-4 flex-shrink-0", isActive && "text-[var(--gold)]")} />
-                  {!collapsed && <span className="truncate">{label}</span>}
+                  {!collapsed && <span className="truncate">{t(label)}</span>}
                   {isActive && !collapsed && <div className="ml-auto w-1.5 h-1.5 rounded-full gold-gradient" />}
                 </>
               )}
@@ -106,17 +116,17 @@ export function AppLayout() {
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate">{profile?.name || user?.email}</p>
-                <p className="text-[10px] text-[var(--ink-400)] capitalize">{role === 'reception' ? 'Recepção' : role === 'professional' ? 'Profissional' : 'Dona'}</p>
+                <p className="text-[10px] text-[var(--ink-400)] capitalize">{role === 'reception' ? tc('roleReception') : role === 'professional' ? tc('roleProfessional') : tc('roleOwner')}</p>
               </div>
             )}
             {!collapsed && (
-              <Button variant="ghost" size="icon-sm" onClick={handleSignOut} title="Sair" className="flex-shrink-0">
+              <Button variant="ghost" size="icon-sm" onClick={handleSignOut} title={t('signOut')} className="flex-shrink-0">
                 <LogOut className="size-3.5" />
               </Button>
             )}
           </div>
           {collapsed && (
-            <Button variant="ghost" size="icon-sm" onClick={handleSignOut} className="w-full mt-1" title="Sair">
+            <Button variant="ghost" size="icon-sm" onClick={handleSignOut} className="w-full mt-1" title={t('signOut')}>
               <LogOut className="size-3.5" />
             </Button>
           )}
@@ -143,13 +153,16 @@ export function AppLayout() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             <NotificationBell />
+            <LanguageToggle />
             <ModeToggle />
           </div>
         </header>
 
+        <SubscriptionBanner />
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
+        <SupportButton />
       </div>
     </div>
   )

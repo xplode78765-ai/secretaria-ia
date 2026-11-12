@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
 
-const DEFAULT_ORIGIN = "https://secretaria.app";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -16,25 +16,13 @@ async function getAppSecret(key: string): Promise<string | null> {
   return value && value.length > 0 ? value : null;
 }
 
-function originAllowed(origin: string, allowlist: string[]): boolean {
-  if (!origin) return false;
-  if (allowlist.includes("*") || allowlist.includes(origin)) return true;
-  try {
-    const host = new URL(origin).hostname;
-    if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
-  } catch {
-    return false;
-  }
-  return false;
-}
 
 async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
   const configured = await getAppSecret("allowed_origin");
   const allowlist = (configured || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!allowlist.includes(DEFAULT_ORIGIN)) allowlist.push(DEFAULT_ORIGIN);
+  const allowLocalhost = (await getAppSecret("cors_allow_localhost")) === "true";
   const requestOrigin = req.headers.get("Origin") || "";
-  const origin = originAllowed(requestOrigin, allowlist) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
+  const origin = originAllowed(requestOrigin, allowlist, allowLocalhost) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
@@ -80,19 +68,32 @@ Deno.serve(async (req: Request) => {
       if (!memberId || memberId === me.id) {
         return new Response(JSON.stringify({ error: "Não é possível remover esta conta" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      await supabase.from("users").update({ studio_id: null, role: "removed" }).eq("id", memberId).eq("studio_id", me.studio_id);
+      const { data: target } = await supabase.from("users").select("id, role").eq("id", memberId).eq("studio_id", me.studio_id).maybeSingle();
+      if (!target) {
+        return new Response(JSON.stringify({ error: "Pessoa não encontrada na equipe" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      // Access ends immediately: every RLS policy reads users.studio_id, which becomes null.
+      await supabase.from("users").update({ studio_id: null, role: "removed", professional_id: null }).eq("id", memberId).eq("studio_id", me.studio_id);
       return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const email = String(body.email || "").trim().toLowerCase();
-    const name = String(body.name || email).trim();
+    const email = String(body.email || "").trim().toLowerCase().slice(0, 254);
+    const name = String(body.name || email).replace(/\s+/g, " ").trim().slice(0, 80);
     const role = ROLES.has(body.role) ? body.role : "reception";
-    const professionalId = body.professional_id || null;
-    if (!email) {
-      return new Response(JSON.stringify({ error: "Informe o e-mail" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // Only a professional account is linked to a professional record.
+    const professionalId = role === "professional" ? (body.professional_id || null) : null;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return new Response(JSON.stringify({ error: "Informe um e-mail válido" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     if (role === "professional" && !professionalId) {
       return new Response(JSON.stringify({ error: "Vincule um profissional do cadastro" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (professionalId) {
+      // The professional record must belong to THIS studio.
+      const { data: prof } = await supabase.from("professionals").select("id").eq("id", String(professionalId)).eq("studio_id", me.studio_id).maybeSingle();
+      if (!prof) {
+        return new Response(JSON.stringify({ error: "Profissional não encontrado neste studio" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     const { data: invited, error: inviteError } = await supabase.auth.admin.inviteUserByEmail(email, {
@@ -111,19 +112,27 @@ Deno.serve(async (req: Request) => {
       }
     }
     if (!userId) {
-      const adminRes = await fetch(`${supabaseUrl}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
-        headers: { Authorization: `Bearer ${serviceRoleKey}`, apikey: serviceRoleKey },
-      });
-      if (adminRes.ok) {
-        const adminJson = await adminRes.json();
-        userId = adminJson?.users?.[0]?.id || adminJson?.id || null;
+      // The admin users endpoint does NOT filter by e-mail: it returns pages of ALL
+      // users. Taking users[0] attached a random account to the studio. Search the
+      // pages for the exact e-mail instead.
+      for (let page = 1; page <= 50 && !userId; page++) {
+        const { data: list, error: listError } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+        if (listError || !list?.users?.length) break;
+        userId = list.users.find((u) => String(u.email || "").toLowerCase() === email)?.id;
+        if (list.users.length < 1000) break;
       }
     }
     if (!userId) {
       return new Response(JSON.stringify({ error: "Não foi possível criar o convite" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { data: existingRow } = await supabase.from("users").select("id, studio_id, role").eq("id", userId).maybeSingle();
+    if (userId === me.id) {
+      return new Response(JSON.stringify({ error: "Você não pode alterar o seu próprio acesso por convite" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const { data: existingRow } = await supabase.from("users").select("id, studio_id, role, is_super_admin").eq("id", userId).maybeSingle();
+    if (existingRow?.is_super_admin) {
+      return new Response(JSON.stringify({ error: "Este e-mail não pode ser convidado" }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     if (existingRow?.studio_id && existingRow.studio_id !== me.studio_id && existingRow.role !== "removed") {
       return new Response(JSON.stringify({ error: "Este e-mail já pertence a outro studio" }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -147,6 +156,7 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("[studio-team] unhandled", err);
+    return new Response(JSON.stringify({ error: "Erro interno. Tente novamente." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

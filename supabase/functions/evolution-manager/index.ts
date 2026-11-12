@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
 
-const DEFAULT_ORIGIN = "https://secretaria.app";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -15,28 +15,13 @@ async function getAppSecret(key: string): Promise<string | null> {
   return value && value.length > 0 ? value : null;
 }
 
-function originAllowed(origin: string, allowlist: string[]): boolean {
-  if (!origin) return false;
-  if (allowlist.includes("*") || allowlist.includes(origin)) return true;
-  try {
-    const host = new URL(origin).hostname;
-    if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
-  } catch {
-    return false;
-  }
-  return false;
-}
 
 async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
   const configured = await getAppSecret("allowed_origin");
-  const allowlist = (configured || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (!allowlist.includes(DEFAULT_ORIGIN)) allowlist.push(DEFAULT_ORIGIN);
+  const allowlist = (configured || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const allowLocalhost = (await getAppSecret("cors_allow_localhost")) === "true";
   const requestOrigin = req.headers.get("Origin") || "";
-  const origin = originAllowed(requestOrigin, allowlist) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
+  const origin = originAllowed(requestOrigin, allowlist, allowLocalhost) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -48,7 +33,7 @@ async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
 async function getConnection(studioId: string) {
   const { data } = await supabase
     .from("evolution_api_connections")
-    .select("id, studio_id, instance_name, status, phone_number, qr_code, qr_code_updated_at, last_connected_at, error_message, created_at, updated_at, evolution_api_key, evolution_api_url")
+    .select("id, studio_id, instance_name, status, phone_number, qr_code, qr_code_updated_at, last_connected_at, error_message, created_at, updated_at")
     .eq("studio_id", studioId)
     .maybeSingle();
   return data;
@@ -168,14 +153,14 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Evolution API key not configured. Set 'evolution_api_key' in app_secrets." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Read webhook_secret and evolution_api_url from app_secrets
+    // webhook_secret and evolution_api_url come ONLY from app_secrets (service_role only).
+    // Never read the URL from evolution_api_connections: a studio could point it at its
+    // own server and receive the master API key and the webhook secret.
     const webhookSecret = await getAppSecret("webhook_secret");
-    const defaultApiUrl = await getAppSecret("evolution_api_url");
+    const apiUrl = ((await getAppSecret("evolution_api_url")) || "").trim().replace(/\/+$/, "");
 
     let conn = await getConnection(studioId);
     const instanceName = conn?.instance_name || `studio-${studioId.slice(0, 8)}`;
-    // Use the URL from the connection record if it exists, otherwise from app_secrets
-    const apiUrl = conn?.evolution_api_url || defaultApiUrl || "";
 
     if (!apiUrl) {
       return new Response(JSON.stringify({ error: "Evolution API URL not configured. Set 'evolution_api_url' in app_secrets." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -349,8 +334,6 @@ Deno.serve(async (req: Request) => {
             studio_id: studioId,
             instance_name: instanceName,
             status: "connecting",
-            evolution_api_key: apiKey,
-            evolution_api_url: apiUrl,
           });
         } else {
           await supabase.from("evolution_api_connections").update({ status: "connecting", error_message: "" }).eq("studio_id", studioId);
@@ -415,6 +398,59 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ status: conn?.status || "disconnected" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Official WhatsApp API (Meta Cloud API) through Evolution. Pro plan only.
+    // The Meta token is passed straight to Evolution and is NOT stored in our database.
+    if (action === "connect_cloud") {
+      const { data: st } = await supabase.from("studios").select("plan, plans(features)").eq("id", studioId).maybeSingle();
+      const planRow = Array.isArray(st?.plans) ? st.plans[0] : st?.plans;
+      if (!(planRow?.features || []).includes("official_api")) {
+        return new Response(JSON.stringify({ error: "A API oficial faz parte do plano Pro", code: "plan_required" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (!webhookSecret) {
+        return new Response(JSON.stringify({ error: "webhook_secret not configured in app_secrets." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const phoneNumberId = String(body.phone_number_id || "").replace(/\D/g, "");
+      const businessId = String(body.business_id || "").replace(/\D/g, "");
+      const metaToken = String(body.token || "").trim();
+      if (!phoneNumberId || !businessId || metaToken.length < 20) {
+        return new Response(JSON.stringify({ error: "Informe o ID do número, o ID da conta do WhatsApp Business e o token", code: "invalid_input" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const cloudName = `studio-${studioId.slice(0, 8)}-oficial`;
+      const createRes = await fetch(`${apiUrl}/instance/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: apiKey },
+        body: JSON.stringify({
+          instanceName: cloudName,
+          integration: "WHATSAPP-BUSINESS",
+          token: metaToken,
+          number: phoneNumberId,
+          businessId,
+          qrcode: false,
+          webhook: {
+            url: `${supabaseUrl}/functions/v1/whatsapp-webhook`,
+            headers: { "X-Webhook-Secret": webhookSecret },
+            byEvents: false,
+            base64: true,
+            events: ["CONNECTION_UPDATE", "MESSAGES_UPSERT"],
+          },
+        }),
+      });
+      if (!createRes.ok) {
+        const errText = await createRes.text();
+        console.error(`[evolution-manager] cloud instance creation failed: status=${createRes.status}, body=${errText.slice(0, 300)}`);
+        return new Response(JSON.stringify({ error: "Não foi possível conectar a API oficial. Confira os dados da Meta.", code: "provider_error" }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      // Leave the QR (Baileys) session, if any, and point the studio to the official instance.
+      if (conn?.instance_name && conn.instance_name !== cloudName) {
+        await fetch(`${apiUrl}/instance/logout/${conn.instance_name}`, { method: "DELETE", headers: { apikey: apiKey } }).catch(() => null);
+      }
+      const row = { instance_name: cloudName, status: "connected", qr_code: "", error_message: "", last_connected_at: new Date().toISOString() };
+      if (conn) await supabase.from("evolution_api_connections").update(row).eq("studio_id", studioId);
+      else await supabase.from("evolution_api_connections").insert({ studio_id: studioId, ...row });
+      await supabase.from("studios").update({ whatsapp_provider: "cloud_api" }).eq("id", studioId);
+      return new Response(JSON.stringify({ status: "connected", provider: "cloud_api" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (action === "disconnect") {
       await fetch(`${apiUrl}/instance/logout/${instanceName}`, { method: "DELETE", headers: { apikey: apiKey } });
       await supabase.from("evolution_api_connections").update({ status: "disconnected", qr_code: "", error_message: "" }).eq("studio_id", studioId);
@@ -424,6 +460,7 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "Invalid action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error(`[evolution-manager] Unhandled error: ${err.message}`);
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("[evolution-manager] unhandled", err);
+    return new Response(JSON.stringify({ error: "Erro interno. Tente novamente." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

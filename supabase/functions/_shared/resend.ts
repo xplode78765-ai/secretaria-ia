@@ -30,12 +30,12 @@ export async function sendResendEmail(opts: SendArgs): Promise<{ ok: boolean; er
   return { ok: true, id: body?.id };
 }
 
-export function wrapEmail(title: string, inner: string) {
+export function wrapEmail(title: string, inner: string, footer = "Enviado pela SecretarIA. Se não esperava este e-mail, pode ignorar.") {
   return `<!doctype html><html><body style="margin:0;background:#f6f3ee;font-family:Georgia,serif;color:#2b241c;">
   <div style="max-width:560px;margin:24px auto;background:#fff;border-radius:16px;padding:28px;border:1px solid #eadfcf;">
     <p style="margin:0 0 8px;letter-spacing:.12em;font-size:11px;color:#b08d57;">SECRETARIA</p>
     <h1 style="margin:0 0 16px;font-size:22px;font-weight:500;">${title}</h1>
     <div style="font-size:15px;line-height:1.55;color:#4a4036;">${inner}</div>
-    <p style="margin:28px 0 0;font-size:12px;color:#8a7d70;">Enviado pela SecretarIA. Se não esperava este e-mail, pode ignorar.</p>
+    <p style="margin:28px 0 0;font-size:12px;color:#8a7d70;">${footer}</p>
   </div></body></html>`;
 }

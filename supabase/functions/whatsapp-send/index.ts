@@ -1,6 +1,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
+import { getEvolutionConfig, sendEvolutionText } from "../_shared/evolution.ts";
+import { formatZoned, safeTz } from "../_shared/brazil.ts";
+import { msg, safeLocale } from "../_shared/messages.ts";
 
-const DEFAULT_ORIGIN = "https://secretaria.app";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -15,28 +18,13 @@ async function getAppSecret(key: string): Promise<string | null> {
   return value && value.length > 0 ? value : null;
 }
 
-function originAllowed(origin: string, allowlist: string[]): boolean {
-  if (!origin) return false;
-  if (allowlist.includes("*") || allowlist.includes(origin)) return true;
-  try {
-    const host = new URL(origin).hostname;
-    if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
-  } catch {
-    return false;
-  }
-  return false;
-}
 
 async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
   const configured = await getAppSecret("allowed_origin");
-  const allowlist = (configured || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (!allowlist.includes(DEFAULT_ORIGIN)) allowlist.push(DEFAULT_ORIGIN);
+  const allowlist = (configured || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const allowLocalhost = (await getAppSecret("cors_allow_localhost")) === "true";
   const requestOrigin = req.headers.get("Origin") || "";
-  const origin = originAllowed(requestOrigin, allowlist) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
+  const origin = originAllowed(requestOrigin, allowlist, allowLocalhost) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -62,13 +50,48 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Invalid token" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { data: userData } = await supabase.from("users").select("studio_id").eq("id", user.id).maybeSingle();
+    const { data: userData } = await supabase.from("users").select("studio_id, role").eq("id", user.id).maybeSingle();
     if (!userData?.studio_id) {
       return new Response(JSON.stringify({ error: "No studio found" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // The WhatsApp inbox is for staff only (owner/admin/reception), same as the RLS policies.
+    if (!["owner", "admin", "reception"].includes(String(userData.role || ""))) {
+      return new Response(JSON.stringify({ error: "Sem permissão para enviar mensagens" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const body = await req.json();
-    const { conversation_id, content } = body;
+
+    // The owner approved a booking made by the AI (approval mode): tell the client.
+    // Sent as the assistant, so it does not pause the AI in that conversation.
+    if (body.kind === "appointment_confirmed") {
+      const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const { data: apt } = await supabase.from("appointments")
+        .select("id, title, start_time, status, client_id, clients(whatsapp, phone)")
+        .eq("id", String(body.appointment_id || "")).eq("studio_id", userData.studio_id).maybeSingle();
+      if (!apt?.client_id || apt.status !== "confirmed") return json({ error: "Agendamento não encontrado" }, 404);
+      const aptClient = Array.isArray(apt.clients) ? apt.clients[0] : apt.clients;
+      const number = aptClient?.whatsapp || aptClient?.phone;
+      const { data: st } = await supabase.from("studios").select("timezone, locale").eq("id", userData.studio_id).maybeSingle();
+      const { data: conn } = await supabase.from("evolution_api_connections").select("instance_name").eq("studio_id", userData.studio_id).eq("status", "connected").maybeSingle();
+      const evo = await getEvolutionConfig(supabase);
+      if (!number || !conn?.instance_name || !evo) return json({ ok: false, skipped: "whatsapp_unavailable" });
+      const text = msg(safeLocale(st?.locale), "aptApproved", { title: apt.title, when: formatZoned(new Date(apt.start_time), safeTz(st?.timezone)) });
+      const { data: convs } = await supabase.from("conversations").select("id").eq("studio_id", userData.studio_id).eq("client_id", apt.client_id).limit(1);
+      const convId = convs?.[0]?.id;
+      const { data: saved } = convId
+        ? await supabase.from("messages").insert({ conversation_id: convId, sender_type: "ai", content: text, message_type: "text", status: "pending", metadata: { type: "appointment_approved", appointment_id: apt.id } }).select("id").single()
+        : { data: null };
+      const res = await sendEvolutionText(evo, conn.instance_name, number, text);
+      if (saved?.id) await supabase.from("messages").update({ status: res.ok ? "sent" : "failed" }).eq("id", saved.id);
+      return json({ ok: res.ok });
+    }
+
+    const conversation_id = String(body.conversation_id || "");
+    const content = String(body.content || "").trim();
+    if (!conversation_id || !content || content.length > 4096) {
+      return new Response(JSON.stringify({ error: "Mensagem inválida" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Verify conversation belongs to this studio
     const { data: conv } = await supabase.from("conversations").select("*, clients(whatsapp, phone)").eq("id", conversation_id).eq("studio_id", userData.studio_id).maybeSingle();
@@ -87,8 +110,9 @@ Deno.serve(async (req: Request) => {
     await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", conversation_id);
 
     // Get connection info for Evolution API
-    const { data: conn } = await supabase.from("evolution_api_connections").select("instance_name, evolution_api_key, evolution_api_url").eq("studio_id", userData.studio_id).maybeSingle();
-    if (!conn) {
+    const { data: conn } = await supabase.from("evolution_api_connections").select("instance_name").eq("studio_id", userData.studio_id).maybeSingle();
+    const evo = await getEvolutionConfig(supabase);
+    if (!conn || !evo) {
       if (insertedMsg) await supabase.from("messages").update({ status: "failed" }).eq("id", insertedMsg.id);
       return new Response(JSON.stringify({ error: "WhatsApp not connected" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -100,11 +124,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Send via Evolution API
-    const sendRes = await fetch(`${conn.evolution_api_url}/message/sendText/${conn.instance_name}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: conn.evolution_api_key },
-      body: JSON.stringify({ number: phone, text: content }),
-    });
+    const sendRes = await sendEvolutionText(evo, conn.instance_name, phone, content);
 
     if (!sendRes.ok) {
       if (insertedMsg) await supabase.from("messages").update({ status: "failed" }).eq("id", insertedMsg.id);
@@ -112,9 +132,13 @@ Deno.serve(async (req: Request) => {
     }
 
     if (insertedMsg) await supabase.from("messages").update({ status: "sent" }).eq("id", insertedMsg.id);
+    // A person from the team answered: pause the AI in this conversation so the two
+    // don't reply at the same time. It can be turned back on from the Conversas screen.
+    await supabase.from("conversations").update({ ai_enabled: false, needs_human: false, needs_human_reason: "" }).eq("id", conversation_id);
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("[whatsapp-send] unhandled", err);
+    return new Response(JSON.stringify({ error: "Erro interno. Tente novamente." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

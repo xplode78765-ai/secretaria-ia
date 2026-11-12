@@ -1,15 +1,22 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Conversation, Message, Client } from '@/lib/supabase'
-import { format } from 'date-fns'
 import { Send, MessageSquare, Bot, Search, AlertCircle, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { formatInStudio, useStudioTz } from '@/lib/timezone'
+import { useT } from '@/i18n'
+
+const CONVERSATION_LIMIT = 200
+const MESSAGE_LIMIT = 300
 
 export function ConversasPage() {
+  const t = useT('conversations')
+  const ts = useT('sales')
+  const tz = useStudioTz()
   const [conversations, setConversations] = useState<(Conversation & { clients: Pick<Client, 'name' | 'phone'> | null })[]>([])
   const [selectedConv, setSelectedConv] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -19,20 +26,23 @@ export function ConversasPage() {
   const [search, setSearch] = useState('')
   const [sending, setSending] = useState(false)
   const [mobileShowChat, setMobileShowChat] = useState(false)
+  const [togglingAi, setTogglingAi] = useState(false)
   const msgEndRef = useRef<HTMLDivElement>(null)
   const selectedConvRef = useRef<string | null>(null)
   selectedConvRef.current = selectedConv
 
   const loadConversations = useCallback(async () => {
-    const { data } = await supabase.from('conversations').select('*, clients(name, phone)').order('last_message_at', { ascending: false })
+    // Refreshed every 5s: only the most recent conversations.
+    const { data } = await supabase.from('conversations').select('*, clients(name, phone)').order('last_message_at', { ascending: false, nullsFirst: false }).limit(CONVERSATION_LIMIT)
     setConversations((data ?? []) as (Conversation & { clients: Pick<Client, 'name' | 'phone'> | null })[])
     if (data && data.length > 0 && !selectedConvRef.current) setSelectedConv(data[0].id)
     setLoading(false)
   }, [])
 
   const loadMessages = useCallback(async (convId: string) => {
-    const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at')
-    setMessages((data ?? []) as Message[])
+    // Refreshed every 5s: only the latest messages of the conversation.
+    const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: false }).limit(MESSAGE_LIMIT)
+    setMessages(((data ?? []) as Message[]).reverse())
     setMsgLoading(false)
   }, [])
 
@@ -62,13 +72,25 @@ export function ConversasPage() {
       body: { conversation_id: selectedConv, content },
     })
     if (error) {
-      toast.error('Erro ao enviar mensagem: ' + error.message)
+      toast.error(t('sendError', { error: error.message }))
       setSending(false)
       return
     }
     setSending(false)
     loadMessages(selectedConv)
     loadConversations()
+  }
+
+  const selectedConvData = conversations.find(c => c.id === selectedConv) ?? null
+
+  const toggleAi = async (convId: string, enabled: boolean) => {
+    setTogglingAi(true)
+    // Taking over (or handing back) also clears the "needs a human" flag.
+    const { error } = await supabase.from('conversations').update({ ai_enabled: enabled, needs_human: false, needs_human_reason: '' }).eq('id', convId)
+    setTogglingAi(false)
+    if (error) { toast.error(t('toggleError', { error: error.message })); return }
+    setConversations(cs => cs.map(c => c.id === convId ? { ...c, ai_enabled: enabled, needs_human: false, needs_human_reason: '' } : c))
+    toast.success(enabled ? t('aiResumed') : t('aiPaused'))
   }
 
   const filtered = conversations.filter(c => {
@@ -82,26 +104,27 @@ export function ConversasPage() {
       {/* Conversation list */}
       <div className={cn("w-full md:w-80 border-r border-[var(--ink-200)] flex-col bg-[var(--canvas)]", mobileShowChat ? "hidden md:flex" : "flex")}>
         <div className="p-4 border-b border-[var(--ink-200)]">
-          <h1 className="text-xl font-serif font-medium mb-3">Conversas</h1>
+          <h1 className="text-xl font-serif font-medium mb-3">{t('title')}</h1>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-[var(--ink-400)]" />
-            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="h-8 pl-8 text-sm" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('searchPh')} className="h-8 pl-8 text-sm" />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           {loading ? <div className="flex justify-center p-8"><Spinner className="text-[var(--gold)]" /></div> : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center px-4">
               <MessageSquare className="size-8 text-[var(--ink-300)] mb-2" />
-              <p className="text-sm text-[var(--ink-500)]">Nenhuma conversa ainda</p>
-              <p className="text-xs text-[var(--ink-400)] mt-1">Conecte o WhatsApp para começar</p>
+              <p className="text-sm text-[var(--ink-500)]">{t('empty')}</p>
+              <p className="text-xs text-[var(--ink-400)] mt-1">{t('emptyHint')}</p>
             </div>
           ) : filtered.map(conv => (
             <div key={conv.id} onClick={() => { setSelectedConv(conv.id); setMobileShowChat(true) }} className={cn("flex items-center gap-3 p-3 cursor-pointer border-b border-[var(--ink-200)] hover:bg-[var(--ink-100)] transition-colors", selectedConv === conv.id && 'bg-[var(--gold-50)]')}>
               <div className="w-10 h-10 rounded-full bg-[var(--ink-100)] flex items-center justify-center text-sm font-medium flex-shrink-0">{(conv.clients?.name ?? '?').slice(0, 1).toUpperCase()}</div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{conv.clients?.name ?? 'Desconhecido'}</p>
+                <p className="text-sm font-medium truncate">{conv.clients?.name ?? t('unknown')}</p>
                 <p className="text-xs text-[var(--ink-500)] truncate">{conv.clients?.phone ?? ''}</p>
               </div>
+              {conv.needs_human && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--danger-50)] text-[var(--danger-700)] border border-[var(--danger-100)] flex-shrink-0">{ts('needsHuman')}</span>}
               {conv.ai_enabled && <Bot className="size-3.5 text-[var(--gold)] flex-shrink-0" />}
             </div>
           ))}
@@ -116,20 +139,38 @@ export function ConversasPage() {
               <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={() => setMobileShowChat(false)}><ArrowLeft className="size-4" /></Button>
               <div className="w-10 h-10 rounded-full bg-[var(--ink-100)] flex items-center justify-center text-sm font-medium">{(conversations.find(c => c.id === selectedConv)?.clients?.name ?? '?').slice(0, 1).toUpperCase()}</div>
               <div>
-                <p className="text-sm font-medium">{conversations.find(c => c.id === selectedConv)?.clients?.name ?? 'Conversa'}</p>
+                <p className="text-sm font-medium">{conversations.find(c => c.id === selectedConv)?.clients?.name ?? t('conversation')}</p>
                 <p className="text-xs text-[var(--ink-500)]">{conversations.find(c => c.id === selectedConv)?.clients?.phone ?? ''}</p>
               </div>
+              {selectedConvData && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn('ml-auto gap-1.5 text-xs', selectedConvData.ai_enabled ? 'border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--ink-500)]')}
+                  onClick={() => void toggleAi(selectedConvData.id, !selectedConvData.ai_enabled)}
+                  disabled={togglingAi}
+                  title={selectedConvData.ai_enabled ? t('aiOnTitle') : t('aiOffTitle')}
+                >
+                  <Bot className="size-3.5" />
+                  {selectedConvData.ai_enabled ? (selectedConvData.needs_human ? ts('takeOver') : t('aiOn')) : t('aiOff')}
+                </Button>
+              )}
             </div>
+            {selectedConvData?.needs_human && (
+              <div className="px-4 py-2 text-xs bg-[var(--danger-50)] text-[var(--danger-700)] border-b border-[var(--danger-100)]" role="status">
+                {ts('needsHumanBanner', { reason: selectedConvData.needs_human_reason || '-' })}
+              </div>
+            )}
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[var(--canvas-subtle)]">
               {msgLoading ? <div className="flex justify-center p-8"><Spinner className="text-[var(--gold)]" /></div> : messages.map(msg => (
                 <div key={msg.id} className={`flex ${msg.sender_type === 'client' ? 'justify-start' : 'justify-end'}`}>
                   {msg.sender_type === 'ai' && <div className="w-7 h-7 rounded-full gold-gradient flex items-center justify-center mr-2 flex-shrink-0 self-end"><Bot className="size-3.5" /></div>}
                   <div className={cn("max-w-[70%] px-4 py-2.5 text-sm", msg.sender_type === 'client' ? 'chat-ai' : 'chat-user')}>
                     {msg.content}
-                    <div className="text-[10px] mt-1 flex items-center gap-1 opacity-50">{format(new Date(msg.created_at), 'HH:mm')}</div>
+                    <div className="text-[10px] mt-1 flex items-center gap-1 opacity-50">{formatInStudio(msg.created_at, 'HH:mm', tz)}</div>
                     {msg.status === 'failed' && (
                       <div className="text-[10px] mt-0.5 flex items-center gap-1 text-red-500 font-medium">
-                        <AlertCircle className="size-3" /> Falha ao enviar
+                        <AlertCircle className="size-3" /> {t('failed')}
                       </div>
                     )}
                   </div>
@@ -138,14 +179,14 @@ export function ConversasPage() {
               <div ref={msgEndRef} />
             </div>
             <div className="p-4 border-t border-[var(--ink-200)] flex gap-2">
-              <Input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Digite uma mensagem..." />
+              <Input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder={t('messagePh')} />
               <Button onClick={sendMessage} className="btn-gold" disabled={sending || !input.trim()}><Send className="size-4" /></Button>
             </div>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <MessageSquare className="size-12 text-[var(--ink-300)] mb-3" />
-            <p className="text-sm font-medium text-[var(--ink-500)]">Selecione uma conversa</p>
+            <p className="text-sm font-medium text-[var(--ink-500)]">{t('select')}</p>
           </div>
         )}
       </div>

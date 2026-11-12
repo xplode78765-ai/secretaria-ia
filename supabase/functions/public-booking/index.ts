@@ -1,8 +1,16 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { formatSaoPaulo, normalizePhone, parseNaiveAsSaoPaulo, phoneLookupValues, saoPauloYmd } from "../_shared/brazil.ts";
+import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
+import { formatZoned, normalizePhone, parseNaiveInZone, phoneLookupValues, zonedYmd, safeTz } from "../_shared/brazil.ts";
 import { notifyStudioStaff } from "../_shared/staff-alert.ts";
+import { msg, safeLocale } from "../_shared/messages.ts";
+import { describeDay, describeWeek, isWithinBusinessHours, normalizeBusinessHours } from "../_shared/hours.ts";
 
-const DEFAULT_ORIGIN = "https://secretaria.app";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_DAYS_AHEAD = 90;
+const LIMIT_PER_PHONE = 3; // attempts per hour
+const LIMIT_PER_IP = 10;
+const LIMIT_PER_STUDIO = 30;
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -17,25 +25,13 @@ async function getAppSecret(key: string): Promise<string | null> {
   return value && value.length > 0 ? value : null;
 }
 
-function originAllowed(origin: string, allowlist: string[]): boolean {
-  if (!origin) return false;
-  if (allowlist.includes("*") || allowlist.includes(origin)) return true;
-  try {
-    const host = new URL(origin).hostname;
-    if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
-  } catch {
-    return false;
-  }
-  return false;
-}
 
 async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
   const configured = await getAppSecret("allowed_origin");
   const allowlist = (configured || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!allowlist.includes(DEFAULT_ORIGIN)) allowlist.push(DEFAULT_ORIGIN);
+  const allowLocalhost = (await getAppSecret("cors_allow_localhost")) === "true";
   const requestOrigin = req.headers.get("Origin") || "";
-  const origin = originAllowed(requestOrigin, allowlist) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
+  const origin = originAllowed(requestOrigin, allowlist, allowLocalhost) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -53,12 +49,17 @@ Deno.serve(async (req: Request) => {
     const slug = url.searchParams.get("slug") || "";
 
     if (req.method === "GET") {
-      const { data: studio } = await supabase.from("studios").select("id, name, slug, address, phone, instagram").eq("slug", slug).maybeSingle();
-      if (!studio) {
-        return new Response(JSON.stringify({ error: "Studio não encontrado" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const { data: row } = await supabase.from("studios").select("id, name, slug, address, phone, instagram, business_hours, timezone").eq("slug", slug).maybeSingle();
+      if (!row) {
+        return new Response(JSON.stringify({ error: "Studio não encontrado", code: "not_found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      const { data: procedures } = await supabase.from("procedures").select("id, name, price, duration").eq("studio_id", studio.id).eq("active", true).order("name");
-      return new Response(JSON.stringify({ studio, procedures: procedures || [] }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const { business_hours, ...studio } = row;
+      const { data: procedures } = await supabase.from("procedures").select("id, name, price, duration").eq("studio_id", row.id).eq("active", true).order("name");
+      return new Response(JSON.stringify({
+        // hours_text stays for older pages; business_hours lets the page describe it in its own language.
+        studio: { ...studio, hours_text: describeWeek(normalizeBusinessHours(business_hours)), business_hours: business_hours || {} },
+        procedures: procedures || [],
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (req.method !== "POST") {
@@ -66,36 +67,61 @@ Deno.serve(async (req: Request) => {
     }
 
     const body = await req.json();
-    const { data: studio } = await supabase.from("studios").select("id, name, slug").eq("slug", body.slug || slug).maybeSingle();
+    const { data: studio } = await supabase.from("studios").select("id, name, slug, business_hours, timezone, locale").eq("slug", body.slug || slug).maybeSingle();
     if (!studio) {
-      return new Response(JSON.stringify({ error: "Studio não encontrado" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Studio não encontrado", code: "not_found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+    // The form sends "2026-11-05T14:00" with no offset: it is the studio's wall clock.
+    const tz = safeTz(studio.timezone);
+    const L = safeLocale(studio.locale);
 
-    const name = String(body.name || "").trim();
-    const phone = normalizePhone(body.phone || "");
-    const start = parseNaiveAsSaoPaulo(String(body.start_time || ""));
-    if (!name || phone.length < 12 || Number.isNaN(start.getTime())) {
-      return new Response(JSON.stringify({ error: "Informe nome, telefone e horário válidos" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const json = (payload: unknown, status: number) =>
+      new Response(JSON.stringify(payload), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+    const name = String(body.name || "").replace(/\s+/g, " ").trim().slice(0, 80);
+    const phone = normalizePhone(String(body.phone || "")).slice(0, 15);
+    const start = parseNaiveInZone(String(body.start_time || ""), tz);
+    if (name.length < 2 || phone.length < 12 || Number.isNaN(start.getTime())) {
+      return json({ error: "Informe nome, telefone e horário válidos", code: "invalid_input" }, 400);
     }
     if (start.getTime() <= Date.now()) {
-      return new Response(JSON.stringify({ error: "Escolha um horário futuro" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return json({ error: "Escolha um horário futuro", code: "past" }, 400);
+    }
+    if (start.getTime() > Date.now() + MAX_DAYS_AHEAD * 24 * 60 * 60 * 1000) {
+      return json({ error: `Agende com no máximo ${MAX_DAYS_AHEAD} dias de antecedência`, code: "too_far", max_days: MAX_DAYS_AHEAD }, 400);
     }
 
-    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-    const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    const { count: recent } = await supabase.from("appointments").select("id", { count: "exact", head: true })
-      .eq("studio_id", studio.id)
-      .like("notes", `%(${ip})%`)
-      .gte("created_at", since);
-    if ((recent ?? 0) > 8) {
-      return new Response(JSON.stringify({ error: "Muitos pedidos agora. Tente em alguns minutos." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
-    const { data: proc } = body.procedure_id
-      ? await supabase.from("procedures").select("id, name, price, duration").eq("id", body.procedure_id).eq("studio_id", studio.id).maybeSingle()
+    // Duration ALWAYS comes from the procedure (never from the request body).
+    const procedureId = typeof body.procedure_id === "string" && UUID_RE.test(body.procedure_id) ? body.procedure_id : null;
+    const { data: proc } = procedureId
+      ? await supabase.from("procedures").select("id, name, price, duration").eq("id", procedureId).eq("studio_id", studio.id).eq("active", true).maybeSingle()
       : { data: null };
-    const duration = Number(proc?.duration || body.duration || 60);
+    if (procedureId && !proc) return json({ error: "Procedimento inválido", code: "invalid_procedure" }, 400);
+    const duration = Math.min(Math.max(Number(proc?.duration) || 60, 15), 8 * 60);
     const end = new Date(start.getTime() + duration * 60 * 1000);
+
+    const hours = normalizeBusinessHours(studio.business_hours);
+    if (!isWithinBusinessHours(hours, start, end, tz)) {
+      return json({ error: `Fora do horário de funcionamento (${describeDay(hours, zonedYmd(start, tz))}). Escolha outro horário.`, code: "outside_hours" }, 400);
+    }
+
+    // Rate limit: every attempt is recorded in a table only the server can read.
+    const ip = (req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown").slice(0, 64);
+    await supabase.from("public_booking_attempts").insert({ studio_id: studio.id, ip, phone });
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const countSince = async (col: "studio_id" | "ip" | "phone", value: string) => {
+      const { count } = await supabase.from("public_booking_attempts").select("id", { count: "exact", head: true })
+        .eq(col, value).gte("created_at", hourAgo);
+      return count ?? 0;
+    };
+    const [byPhone, byIp, byStudio] = await Promise.all([
+      countSince("phone", phone),
+      countSince("ip", ip),
+      countSince("studio_id", studio.id),
+    ]);
+    if (byPhone > LIMIT_PER_PHONE || byIp > LIMIT_PER_IP || byStudio > LIMIT_PER_STUDIO) {
+      return json({ error: "Muitos pedidos agora. Tente de novo mais tarde ou chame o studio no WhatsApp.", code: "rate_limited" }, 429);
+    }
 
     const { data: openSlots } = await supabase.from("appointments")
       .select("id, professional_id")
@@ -108,11 +134,12 @@ Deno.serve(async (req: Request) => {
     const studioBusy = (openSlots || []).some((a) => !a.professional_id);
     const freePro = (profs || []).find((p) => !busy.has(p.id));
     if (studioBusy || ((profs || []).length > 0 && !freePro)) {
-      return new Response(JSON.stringify({ error: "Horário indisponível. Escolha outro." }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Horário indisponível. Escolha outro.", code: "unavailable" }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     const ors = phoneLookupValues(phone).flatMap((v) => [`phone.eq.${v}`, `whatsapp.eq.${v}`]).join(",");
-    let { data: client } = await supabase.from("clients").select("id").eq("studio_id", studio.id).or(ors).maybeSingle();
+    const { data: found } = await supabase.from("clients").select("id").eq("studio_id", studio.id).or(ors).order("created_at").limit(1);
+    let client: { id: string } | null = found?.[0] ?? null;
     if (!client) {
       const created = await supabase.from("clients").insert({
         studio_id: studio.id,
@@ -125,10 +152,10 @@ Deno.serve(async (req: Request) => {
       client = created.data;
     }
     if (!client?.id) {
-      return new Response(JSON.stringify({ error: "Não foi possível cadastrar a cliente" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Não foi possível cadastrar a cliente", code: "internal" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const title = proc?.name || "Agendamento online";
+    const title = proc?.name || msg(L, "publicTitle");
     const { error } = await supabase.from("appointments").insert({
       studio_id: studio.id,
       client_id: client.id,
@@ -137,35 +164,38 @@ Deno.serve(async (req: Request) => {
       title,
       start_time: start.toISOString(),
       end_time: end.toISOString(),
-      date: saoPauloYmd(start),
+      date: zonedYmd(start, tz),
       status: "pending",
       price: Number(proc?.price || 0),
       payment_status: "pending",
-      notes: `Criado pelo link público (${ip})`,
+      notes: msg(L, "notePublic"),
+      source: "public",
     });
     if (error) {
       const msg = String(error.message || "");
       if (msg.includes("appointments_no_overlap") || error.code === "23P01") {
-        return new Response(JSON.stringify({ error: "Horário indisponível. Escolha outro." }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "Horário indisponível. Escolha outro.", code: "unavailable" }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      console.error("[public-booking] insert failed", error.message);
+      return new Response(JSON.stringify({ error: "Não foi possível agendar agora. Tente novamente.", code: "internal" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     await supabase.from("notifications").insert({
       studio_id: studio.id,
       client_id: client.id,
       type: "new_appointment",
-      title: "Agendamento pelo link público",
-      content: `${name} — ${title} em ${formatSaoPaulo(start)}`,
+      title: msg(L, "notifNewPublic"),
+      content: msg(L, "notifPublicContent", { client: name, title, when: formatZoned(start, tz) }),
     });
     void notifyStudioStaff(
       supabase,
       studio.id,
-      `📅 Novo agendamento (link público)\n${name} — ${title}\n${formatSaoPaulo(start)}`,
+      msg(L, "staffNewPublic", { client: name, title, when: formatZoned(start, tz) }),
     );
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("[public-booking] unhandled", err);
+    return new Response(JSON.stringify({ error: "Erro inesperado. Tente novamente.", code: "internal" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

@@ -24,6 +24,7 @@ import { AdminDashboardPage } from '@/pages/AdminDashboardPage'
 import { EquipePage } from '@/pages/EquipePage'
 import { AgendarPage } from '@/pages/AgendarPage'
 import { SemStudioPage } from '@/pages/SemStudioPage'
+import { TermsPage, PrivacyPage } from '@/pages/LegalPages'
 import { Spinner } from '@/components/ui/spinner'
 import { canAccessPath } from '@/lib/roles'
 
@@ -58,7 +59,7 @@ function ProtectedRoute({ children, allowOnboarding = false }: { children: React
 
 function RoleRoute({ children, path }: { children: React.ReactNode; path: string }) {
   const { profile } = useAuth()
-  if (!canAccessPath(profile?.role, path)) return <Navigate to="/app" replace />
+  if (!canAccessPath(profile?.role, path, profile?.plan_features)) return <Navigate to="/app" replace />
   return <>{children}</>
 }
 
@@ -96,6 +97,8 @@ export function App() {
         </Route>
         <Route path="/agendar/:slug" element={<AgendarPage />} />
         <Route path="/sem-studio" element={<SemStudioPage />} />
+        <Route path="/termos" element={<TermsPage />} />
+        <Route path="/privacidade" element={<PrivacyPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/dashboard" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
         <Route path="/" element={<Navigate to="/login" replace />} />

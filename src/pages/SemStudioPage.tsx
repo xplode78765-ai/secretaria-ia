@@ -2,8 +2,12 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { useT } from '@/i18n'
+import { LanguageToggle } from '@/components/LanguageToggle'
 
 export function SemStudioPage() {
+  const tc = useT('common')
+  const t = useT('auth')
   const { user, profile, loading, signOut } = useAuth()
   const navigate = useNavigate()
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Spinner className="text-[var(--gold)]" /></div>
@@ -12,11 +16,12 @@ export function SemStudioPage() {
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="luxury-card max-w-md p-8 space-y-4 text-center">
-        <h1 className="text-2xl font-serif">Sem studio</h1>
+        <div className="flex justify-end"><LanguageToggle /></div>
+        <h1 className="text-2xl font-serif">{t('noStudioTitle')}</h1>
         <p className="text-sm text-[var(--ink-500)]">
-          Esta conta não está ligada a um studio. Peça um novo convite para a dona ou entre com outro e-mail.
+          {t('noStudioText')}
         </p>
-        <Button className="btn-gold" onClick={async () => { await signOut(); navigate('/login') }}>Sair</Button>
+        <Button className="btn-gold" onClick={async () => { await signOut(); navigate('/login') }}>{tc('signOut')}</Button>
       </div>
     </div>
   )

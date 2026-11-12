@@ -4,14 +4,21 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import type { Appointment, Client } from '@/lib/supabase'
 import { format, startOfDay, endOfDay } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
 import { CalendarDays, Users, TrendingUp, Bot, ChevronRight, MessageSquare, DollarSign } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { formatInStudio, fromStudioClock, nowInStudio, useStudioTz } from '@/lib/timezone'
+import { useT } from '@/i18n'
+import { useI18n } from '@/i18n'
+import { statusKey } from '@/i18n/status'
+import { AiImpactPanel } from '@/components/AiImpactPanel'
+import { WaitlistCard } from '@/components/WaitlistCard'
 
 type AptWithClient = Appointment & { clients: Pick<Client, 'name'> | null }
 
 export function DashboardPage() {
+  const tc = useT('common')
+  const t = useT('dashboard')
   const { profile } = useAuth()
   const [todayApts, setTodayApts] = useState<AptWithClient[]>([])
   const [totalClients, setTotalClients] = useState(0)
@@ -19,14 +26,17 @@ export function DashboardPage() {
   const [activeConvs, setActiveConvs] = useState(0)
   const [caixaHoje, setCaixaHoje] = useState(0)
   const [loading, setLoading] = useState(true)
-  const today = new Date()
+  const tz = useStudioTz()
+  const { dateLocale, intlLocale } = useI18n()
+  // "Today" and the month are the STUDIO's (studios.timezone), not the browser's.
+  const today = nowInStudio(tz)
 
   useEffect(() => { loadData() }, [profile?.professional_id, profile?.role])
 
   const loadData = async () => {
-    const startOfToday = startOfDay(today).toISOString()
-    const endOfToday = endOfDay(today).toISOString()
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
+    const startOfToday = fromStudioClock(startOfDay(today), tz).toISOString()
+    const endOfToday = fromStudioClock(endOfDay(today), tz).toISOString()
+    const startOfMonth = fromStudioClock(new Date(today.getFullYear(), today.getMonth(), 1), tz).toISOString()
 
     let aptsQuery = supabase.from('appointments').select('*, clients(name)').gte('start_time', startOfToday).lte('start_time', endOfToday).order('start_time')
     if (profile?.role === 'professional' && profile.professional_id) {
@@ -57,22 +67,22 @@ export function DashboardPage() {
   }
 
   const cards = [
-    { title: 'Agendamentos Hoje', value: todayApts.length, icon: CalendarDays, desc: `${todayApts.filter(a => a.status === 'confirmed').length} confirmados`, gold: true },
-    { title: 'Total de Clientes', value: totalClients, icon: Users, desc: 'na sua base' },
-    { title: 'Faturamento do Mês', value: `R$ ${monthRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: TrendingUp, desc: 'procedimentos realizados' },
-    { title: 'Caixa de hoje', value: `R$ ${caixaHoje.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, icon: DollarSign, desc: 'pagamentos recebidos' },
-    { title: 'Conversas Ativas', value: activeConvs, icon: MessageSquare, desc: 'no WhatsApp' },
+    { title: t('cardToday'), value: todayApts.length, icon: CalendarDays, desc: t('cardTodayDesc', { count: todayApts.filter(a => a.status === 'confirmed').length }), gold: true },
+    { title: t('cardClients'), value: totalClients, icon: Users, desc: t('cardClientsDesc') },
+    { title: t('cardRevenue'), value: `R$ ${monthRevenue.toLocaleString(intlLocale, { minimumFractionDigits: 2 })}`, icon: TrendingUp, desc: t('cardRevenueDesc') },
+    { title: t('cardCash'), value: `R$ ${caixaHoje.toLocaleString(intlLocale, { minimumFractionDigits: 2 })}`, icon: DollarSign, desc: t('cardCashDesc') },
+    { title: t('cardConvs'), value: activeConvs, icon: MessageSquare, desc: t('cardConvsDesc') },
   ]
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-serif font-medium">Olá! 👋</h1>
-          <p className="text-sm text-[var(--ink-500)] mt-0.5">{format(today, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
+          <h1 className="text-2xl font-serif font-medium">{t('hello')}</h1>
+          <p className="text-sm text-[var(--ink-500)] mt-0.5">{format(today, t('longDate'), { locale: dateLocale })}</p>
         </div>
         <Link to="/app/agenda">
-          <Button className="btn-gold gap-2"><CalendarDays className="size-4" />Nova consulta</Button>
+          <Button className="btn-gold gap-2"><CalendarDays className="size-4" />{t('newBooking')}</Button>
         </Link>
       </div>
 
@@ -94,14 +104,16 @@ export function DashboardPage() {
         ))}
       </div>
 
+      <AiImpactPanel />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 luxury-card">
           <div className="px-6 py-4 border-b border-[var(--ink-200)] flex items-center justify-between">
             <div>
-              <h2 className="font-serif font-medium text-lg">Agenda de Hoje</h2>
-              <p className="text-xs text-[var(--ink-500)] mt-0.5">{format(today, "dd 'de' MMMM", { locale: ptBR })}</p>
+              <h2 className="font-serif font-medium text-lg">{t('todayAgenda')}</h2>
+              <p className="text-xs text-[var(--ink-500)] mt-0.5">{format(today, t('shortDate'), { locale: dateLocale })}</p>
             </div>
-            <Link to="/app/agenda"><Button variant="ghost" size="sm" className="text-xs gap-1">Ver tudo <ChevronRight className="size-3" /></Button></Link>
+            <Link to="/app/agenda"><Button variant="ghost" size="sm" className="text-xs gap-1">{t('seeAll')} <ChevronRight className="size-3" /></Button></Link>
           </div>
           <div className="p-4 space-y-2 max-h-80 overflow-y-auto">
             {loading ? (
@@ -114,23 +126,23 @@ export function DashboardPage() {
             ) : todayApts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">
                 <div className="w-12 h-12 rounded-2xl gold-gradient flex items-center justify-center mb-3 opacity-40"><CalendarDays className="size-5" /></div>
-                <p className="text-sm font-medium text-[var(--ink-500)]">Nenhum agendamento hoje</p>
-                <p className="text-xs text-[var(--ink-500)] mt-1">Aproveite para relaxar</p>
+                <p className="text-sm font-medium text-[var(--ink-500)]">{t('noneToday')}</p>
+                <p className="text-xs text-[var(--ink-500)] mt-1">{t('relax')}</p>
               </div>
             ) : (
               todayApts.map(apt => (
                 <div key={apt.id} className="flex items-center gap-3 p-3 rounded-lg border border-[var(--ink-200)] hover:border-[var(--gold-200)] hover:bg-[var(--gold-50)]/30 transition-all">
                   <div className="text-center min-w-[3rem] bg-[var(--ink-100)] rounded-lg py-1.5">
-                    <p className="text-xs font-bold leading-none">{format(new Date(apt.start_time), 'HH:mm')}</p>
-                    <p className="text-[10px] text-[var(--ink-500)] mt-0.5">{format(new Date(apt.end_time), 'HH:mm')}</p>
+                    <p className="text-xs font-bold leading-none">{formatInStudio(apt.start_time, 'HH:mm', tz)}</p>
+                    <p className="text-[10px] text-[var(--ink-500)] mt-0.5">{formatInStudio(apt.end_time, 'HH:mm', tz)}</p>
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{apt.title}</p>
-                    <p className="text-xs text-[var(--ink-500)]">{apt.clients?.name ?? 'Cliente'}</p>
+                    <p className="text-xs text-[var(--ink-500)]">{apt.clients?.name ?? tc('client')}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {apt.price > 0 && <span className="text-xs font-medium text-[var(--success-700)]">R$ {apt.price.toFixed(2)}</span>}
-                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge[apt.status] ?? ''}`}>{apt.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusBadge[apt.status] ?? ''}`}>{statusKey(apt.status) ? tc(statusKey(apt.status)!) : apt.status}</span>
                   </div>
                 </div>
               ))
@@ -139,13 +151,13 @@ export function DashboardPage() {
         </div>
 
         <div className="luxury-card">
-          <div className="px-6 py-4 border-b border-[var(--ink-200)]"><h2 className="font-serif font-medium text-lg">Atalhos</h2></div>
+          <div className="px-6 py-4 border-b border-[var(--ink-200)]"><h2 className="font-serif font-medium text-lg">{t('shortcuts')}</h2></div>
           <div className="p-4 space-y-2">
             {[
-              { to: '/app/agenda', icon: CalendarDays, label: 'Novo Agendamento', desc: 'Adicionar à agenda' },
-              { to: '/app/clientes', icon: Users, label: 'Novo Cliente', desc: 'Cadastrar cliente' },
-              { to: '/app/secretaria-ia', icon: Bot, label: 'Configurar IA', desc: 'Personalizar respostas' },
-              { to: '/app/conversas', icon: MessageSquare, label: 'Ver Conversas', desc: 'WhatsApp ativo' },
+              { to: '/app/agenda', icon: CalendarDays, label: t('scNewApt'), desc: t('scNewAptDesc') },
+              { to: '/app/clientes', icon: Users, label: t('scNewClient'), desc: t('scNewClientDesc') },
+              { to: '/app/secretaria-ia', icon: Bot, label: t('scAi'), desc: t('scAiDesc') },
+              { to: '/app/conversas', icon: MessageSquare, label: t('scConvs'), desc: t('scConvsDesc') },
             ].map(({ to, icon: Icon, label, desc }) => (
               <Link key={to} to={to}>
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-[var(--ink-200)] hover:border-[var(--gold-200)] hover:bg-[var(--gold-50)]/30 transition-all group cursor-pointer">
@@ -159,6 +171,8 @@ export function DashboardPage() {
         </div>
       </div>
 
+      <WaitlistCard />
+
       <div className="rounded-xl overflow-hidden relative" style={{ background: 'linear-gradient(135deg, #111111 0%, #2A2A2A 100%)' }}>
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 80% 50%, #D4AF37, transparent 60%)' }} />
         <div className="relative px-6 py-6 flex items-center justify-between gap-4">
@@ -167,10 +181,10 @@ export function DashboardPage() {
               <div className="w-6 h-6 rounded gold-gradient flex items-center justify-center"><Bot className="size-3.5" /></div>
               <span className="text-xs font-medium tracking-[0.15em] uppercase" style={{ color: '#E4C982' }}>SecretarIA</span>
             </div>
-            <h3 className="text-lg font-serif font-medium text-white mb-1">Sua IA está trabalhando 24h</h3>
-            <p className="text-sm text-white/50">Respondendo clientes, agendando e organizando seu studio enquanto você descansa.</p>
+            <h3 className="text-lg font-serif font-medium text-white mb-1">{t('bannerTitle')}</h3>
+            <p className="text-sm text-white/50">{t('bannerText')}</p>
           </div>
-          <Link to="/app/secretaria-ia" className="flex-shrink-0"><Button className="btn-gold whitespace-nowrap">Configurar IA</Button></Link>
+          <Link to="/app/secretaria-ia" className="flex-shrink-0"><Button className="btn-gold whitespace-nowrap">{t('bannerCta')}</Button></Link>
         </div>
       </div>
     </div>

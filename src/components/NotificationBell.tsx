@@ -6,10 +6,13 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { formatDistanceToNow } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
+import { useT } from '@/i18n'
+import { useI18n } from '@/i18n'
 
 export function NotificationBell() {
+  const t = useT('layout')
   const { profile } = useAuth()
+  const { dateLocale } = useI18n()
   const [items, setItems] = useState<Notification[]>([])
   const unread = items.filter((n) => !n.read_at).length
 
@@ -56,22 +59,22 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent className="w-80 p-0" align="end">
         <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--ink-200)]">
-          <p className="text-sm font-medium">Notificações</p>
+          <p className="text-sm font-medium">{t('notifications')}</p>
           {unread > 0 && (
             <button type="button" className="text-xs text-[var(--gold)]" onClick={() => void markAll()}>
-              Marcar lidas
+              {t('markAllRead')}
             </button>
           )}
         </div>
         <div className="max-h-80 overflow-y-auto">
           {items.length === 0 ? (
-            <p className="text-sm text-[var(--ink-500)] text-center py-8">Nenhuma notificação</p>
+            <p className="text-sm text-[var(--ink-500)] text-center py-8">{t('noNotifications')}</p>
           ) : items.map((n) => (
             <div key={n.id} className={`px-3 py-2 border-b border-[var(--ink-100)] cursor-pointer ${n.read_at ? '' : 'bg-[var(--gold-50)]/40'}`} onClick={() => { if (!n.read_at) void markOne(n.id) }}>
               <p className="text-sm font-medium">{n.title}</p>
               <p className="text-xs text-[var(--ink-500)] line-clamp-2">{n.content}</p>
               <p className="text-[10px] text-[var(--ink-400)] mt-1">
-                {formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: ptBR })}
+                {formatDistanceToNow(new Date(n.created_at), { addSuffix: true, locale: dateLocale })}
               </p>
             </div>
           ))}

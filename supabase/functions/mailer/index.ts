@@ -1,10 +1,16 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
+import { MFA_REQUIRED_ERROR, tokenAal } from "../_shared/jwt.ts";
+import { msg, safeLocale } from "../_shared/messages.ts";
 import { sendResendEmail, wrapEmail } from "../_shared/resend.ts";
 
-const DEFAULT_ORIGIN = "https://secretaria.app";
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
 
 async function getAppSecret(key: string): Promise<string | null> {
   const { data } = await supabase.from("app_secrets").select("value").eq("key", key).maybeSingle();
@@ -12,25 +18,13 @@ async function getAppSecret(key: string): Promise<string | null> {
   return value && value.length > 0 ? value : null;
 }
 
-function originAllowed(origin: string, allowlist: string[]): boolean {
-  if (!origin) return false;
-  if (allowlist.includes("*") || allowlist.includes(origin)) return true;
-  try {
-    const host = new URL(origin).hostname;
-    if (host === "localhost" || host === "127.0.0.1") return true;
-    if (host.endsWith(".bolt.new") || host.endsWith(".bolt.host") || host.endsWith(".stackblitz.io") || host.endsWith(".netlify.app")) return true;
-  } catch {
-    return false;
-  }
-  return false;
-}
 
 async function getCorsHeaders(req: Request): Promise<Record<string, string>> {
   const configured = await getAppSecret("allowed_origin");
   const allowlist = (configured || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!allowlist.includes(DEFAULT_ORIGIN)) allowlist.push(DEFAULT_ORIGIN);
+  const allowLocalhost = (await getAppSecret("cors_allow_localhost")) === "true";
   const requestOrigin = req.headers.get("Origin") || "";
-  const origin = originAllowed(requestOrigin, allowlist) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
+  const origin = originAllowed(requestOrigin, allowlist, allowLocalhost) ? requestOrigin : (allowlist[0] || DEFAULT_ORIGIN);
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -65,25 +59,48 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "welcome") {
-      const to = me?.email || user.email;
-      if (!to) {
+      // Only to the address verified by Supabase Auth, only once per user, and with
+      // name/studio read from the database (never from the request body).
+      const to = user.email;
+      if (!to || !me?.id) {
         return new Response(JSON.stringify({ error: "Sem e-mail no cadastro" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      const name = body.user_name || me?.name || "oi";
-      const studio = body.studio_name || "seu studio";
-      const appUrl = (await getAppSecret("allowed_origin")) || "https://secretaria-ia-studio-otpx.bolt.host";
+      const { data: claimed } = await supabase.from("users")
+        .update({ welcome_email_sent_at: new Date().toISOString() })
+        .eq("id", me.id)
+        .is("welcome_email_sent_at", null)
+        .select("id");
+      if (!claimed || claimed.length === 0) {
+        return new Response(JSON.stringify({ ok: true, skipped: "already_sent" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const { data: studioRow } = me.studio_id
+        ? await supabase.from("studios").select("name, locale").eq("id", me.studio_id).maybeSingle()
+        : { data: null };
+      // Language: the one the person signed up in (app sends "pt"/"es"), else the studio's.
+      const L = body.lang === "es" || body.lang === "pt" ? body.lang : safeLocale(studioRow?.locale);
+      const name = escapeHtml(String(me.name || "").slice(0, 80) || msg(L, "welcomeHi"));
+      const studio = escapeHtml(String(studioRow?.name || "").slice(0, 120) || msg(L, "welcomeYourStudio"));
+      const configured = ((await getAppSecret("allowed_origin")) || "").split(",").map((s) => s.trim()).find((s) => s.startsWith("https://"));
+      const appUrl = configured || DEFAULT_ORIGIN;
       const html = wrapEmail(
-        `Bem-vinda, ${name}`,
-        `<p>Seu espaço na SecretarIA para <strong>${studio}</strong> já está pronto.</p>
-         <p>Por lá você agenda pelo WhatsApp, vê o dia e recebe aviso no celular.</p>
-         <p><a href="${appUrl}" style="color:#b08d57;">Abrir o app</a></p>`,
+        msg(L, "welcomeTitle", { name }),
+        `<p>${msg(L, "welcomeBody1", { studio })}</p>
+         <p>${msg(L, "welcomeBody2")}</p>
+         <p><a href="${escapeHtml(appUrl)}" style="color:#b08d57;">${msg(L, "welcomeCta")}</a></p>`,
+        msg(L, "welcomeFooter"),
       );
-      const sent = await sendResendEmail({ apiKey, from, to, subject: `Bem-vinda à SecretarIA, ${name}`, html });
-      return new Response(JSON.stringify(sent), { status: sent.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      const plainName = String(me.name || "").replace(/[\r\n]+/g, " ").slice(0, 80) || msg(L, "welcomeHi");
+      const sent = await sendResendEmail({ apiKey, from, to, subject: msg(L, "welcomeSubject", { name: plainName }), html });
+      if (!sent.ok) await supabase.from("users").update({ welcome_email_sent_at: null }).eq("id", me.id);
+      return new Response(JSON.stringify({ ok: sent.ok }), { status: sent.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (!me?.is_super_admin) {
       return new Response(JSON.stringify({ error: "Apenas o admin da plataforma" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    // E-mailing every studio requires the second factor in this session.
+    if (tokenAal(token) !== "aal2") {
+      return new Response(JSON.stringify({ error: MFA_REQUIRED_ERROR }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     if (action === "test") {
@@ -132,6 +149,7 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify({ error: "Invalid action" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    console.error("[mailer] unhandled", err);
+    return new Response(JSON.stringify({ error: "Erro interno. Tente novamente." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

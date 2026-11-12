@@ -16,6 +16,14 @@ export type Studio = {
   instagram: string
   slug: string
   business_hours: Record<string, unknown>
+  timezone: string
+  locale: 'pt' | 'es'
+  booking_mode: 'auto' | 'approval'
+  deposit_percent: number
+  pix_key: string
+  plan: string
+  subscription_status: string
+  trial_ends_at: string | null
   onboarding_completed: boolean
   created_at: string
   updated_at: string
@@ -31,6 +39,15 @@ export type UserProfile = {
   professional_id: string | null
   is_super_admin: boolean
   onboarding_completed: boolean
+  /** studios.timezone of the user's studio (IANA), loaded with the profile */
+  studio_timezone: string
+  /** studios.locale: language of the messages sent to clients/staff */
+  studio_locale: 'pt' | 'es'
+  /** Plan and subscription of the user's studio */
+  studio_plan: string
+  subscription_status: 'trialing' | 'active' | 'past_due' | 'paused' | 'cancelled'
+  trial_ends_at: string | null
+  plan_features: string[]
   created_at: string
   updated_at: string
 }
@@ -114,6 +131,9 @@ export type Appointment = {
   price: number
   payment_status: string
   notes: string
+  source: string
+  deposit_amount: number
+  deposit_paid: boolean
   created_at: string
 }
 
@@ -126,6 +146,8 @@ export type Conversation = {
   ai_enabled: boolean
   last_message_at: string | null
   ai_state: Record<string, unknown>
+  needs_human: boolean
+  needs_human_reason: string
   created_at: string
 }
 
