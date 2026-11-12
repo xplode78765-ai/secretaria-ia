@@ -32,6 +32,15 @@ const TIME_RE = /^\d{2}:\d{2}$/
 export function loadWeek(raw: unknown): WeekConfig {
   const base = defaultWeek()
   if (!raw || typeof raw !== 'object') return base
+  // Older format: { open: "09:00", close: "19:00", weekdays: [1,2,3,4,5,6] }
+  const legacy = raw as { open?: unknown; close?: unknown; weekdays?: unknown }
+  if (Array.isArray(legacy.weekdays)) {
+    const open = TIME_RE.test(String(legacy.open)) ? String(legacy.open) : '09:00'
+    const close = TIME_RE.test(String(legacy.close)) ? String(legacy.close) : '19:00'
+    const days = new Set(legacy.weekdays.map(Number))
+    for (let d = 0; d < 7; d++) base[String(d)] = { open, close, closed: !days.has(d) }
+    return base
+  }
   const src = raw as Record<string, Partial<DayConfig>>
   if (!Object.keys(src).some((k) => /^[0-6]$/.test(k))) return base
   for (let d = 0; d < 7; d++) {

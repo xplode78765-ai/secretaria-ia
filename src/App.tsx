@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { postAuthPath } from '@/lib/auth-nav'
+import { isPasswordRecovery, postAuthPath } from '@/lib/auth-nav'
 import { AppLayout } from '@/components/AppLayout'
 import { LoginPage } from '@/pages/LoginPage'
 import { RegisterPage } from '@/pages/RegisterPage'
@@ -32,8 +32,18 @@ function FullPageSpinner() {
   return <div className="flex items-center justify-center min-h-screen"><Spinner className="size-6 text-[var(--gold)]" /></div>
 }
 
+function RootRedirect() {
+  if (isPasswordRecovery()) {
+    return <Navigate to={{ pathname: '/recuperar-senha', search: window.location.search, hash: window.location.hash }} replace />
+  }
+  return <Navigate to="/login" replace />
+}
+
 function GuestRoute({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
+  if (isPasswordRecovery()) {
+    return <Navigate to={{ pathname: '/recuperar-senha', search: window.location.search, hash: window.location.hash }} replace />
+  }
   if (loading) return <FullPageSpinner />
   if (user && profile) return <Navigate to={postAuthPath(profile)} replace />
   return <>{children}</>
@@ -41,6 +51,9 @@ function GuestRoute({ children }: { children: React.ReactNode }) {
 
 function ProtectedRoute({ children, allowOnboarding = false }: { children: React.ReactNode; allowOnboarding?: boolean }) {
   const { user, profile, loading } = useAuth()
+  if (isPasswordRecovery()) {
+    return <Navigate to={{ pathname: '/recuperar-senha', search: window.location.search, hash: window.location.hash }} replace />
+  }
   if (loading) return <FullPageSpinner />
   if (!user) return <Navigate to="/login" replace />
   if (!profile) return <Navigate to="/login" replace />
@@ -101,8 +114,8 @@ export function App() {
         <Route path="/privacidade" element={<PrivacyPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/admin/dashboard" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="*" element={<RootRedirect />} />
       </Routes>
     </BrowserRouter>
   )

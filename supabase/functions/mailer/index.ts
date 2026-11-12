@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
       const name = escapeHtml(String(me.name || "").slice(0, 80) || msg(L, "welcomeHi"));
       const studio = escapeHtml(String(studioRow?.name || "").slice(0, 120) || msg(L, "welcomeYourStudio"));
       const configured = ((await getAppSecret("allowed_origin")) || "").split(",").map((s) => s.trim()).find((s) => s.startsWith("https://"));
-      const appUrl = configured || DEFAULT_ORIGIN;
+      const appUrl = configured || "https://usesecretaria.netlify.app";
       const html = wrapEmail(
         msg(L, "welcomeTitle", { name }),
         `<p>${msg(L, "welcomeBody1", { studio })}</p>

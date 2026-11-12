@@ -61,6 +61,7 @@ const pt = {
   noteGpt: "Criado pela SecretarIA (GPT) no WhatsApp",
   notePublic: "Criado pelo link público",
   publicTitle: "Agendamento online",
+  publicReceived: "Recebemos seu pedido de {title} para {when}. O studio confirma em breve.",
   // staff WhatsApp alerts
   staffCancel: "❌ Cancelamento\n{client} — {title}\n{when}",
   staffConfirm: "✅ Confirmação de atendimento\n{client} — {title}\n{when}",
@@ -179,6 +180,7 @@ const es: { [K in keyof typeof pt]: string } = {
   noteGpt: "Creado por SecretarIA (GPT) en WhatsApp",
   notePublic: "Creado desde el enlace público",
   publicTitle: "Reserva en línea",
+  publicReceived: "Recibimos tu solicitud de {title} para el {when}. El estudio te confirma pronto.",
   staffCancel: "❌ Cancelación\n{client} — {title}\n{when}",
   staffConfirm: "✅ Cita confirmada\n{client} — {title}\n{when}",
   staffNewAuto: "📅 Nueva cita (automática)\n{client} — {title}\n{when}",

@@ -18,7 +18,7 @@ import { agendaHourRange, defaultWeek, loadWeek, type WeekConfig } from '@/lib/b
 import { fetchAll } from '@/lib/fetch-all'
 import { useConfirm } from '@/components/ConfirmDialog'
 import { useT } from '@/i18n'
-import { useI18n } from '@/i18n'
+import { translate, useI18n } from '@/i18n'
 import { weekdayLabels } from '@/lib/business-hours'
 import { callEdge } from '@/lib/edge'
 
@@ -135,6 +135,24 @@ export function AgendaPage() {
       aptId = result.data?.id
     }
     if (result.error) { toast.error(t('saveError', { error: result.error.message })); setSaving(false); return }
+    // Bell notification + WhatsApp alert to the studio, in the studio's language.
+    {
+      const sl = profile.studio_locale
+      const clientName = clients.find((c) => c.id === form.client_id)?.name || translate(sl, 'common', 'noClient')
+      const whenLabel = format(new Date(form.start_time), 'dd/MM/yyyy HH:mm')
+      const verb = translate(sl, 'agenda', !editApt ? 'alertNew' : form.status === 'cancelled' ? 'alertCancelled' : 'alertChanged')
+      const what = form.title || translate(sl, 'agenda', 'alertDefaultTitle')
+      void supabase.from('notifications').insert({
+        studio_id: profile.studio_id,
+        client_id: form.client_id || null,
+        type: form.status === 'cancelled' ? 'appointment_cancelled' : 'new_appointment',
+        title: verb,
+        content: `${clientName} — ${what} · ${whenLabel}`,
+      })
+      void supabase.functions.invoke('whatsapp-send', {
+        body: { action: 'staff_alert', text: `📅 ${verb}\n${clientName} — ${what}\n${whenLabel}` },
+      })
+    }
     if (form.status === 'done' && (parseFloat(form.price) || 0) > 0) {
       let commission = 0
       if (form.professional_id) {

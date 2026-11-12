@@ -2,35 +2,39 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { clearPasswordRecovery, isPasswordRecovery, markPasswordRecovery, resetPasswordErrorKey } from '@/lib/auth-nav'
+import { useT } from '@/i18n'
+import { LanguageToggle } from '@/components/LanguageToggle'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { CheckCircle2 } from 'lucide-react'
-import { useT } from '@/i18n'
-import { LanguageToggle } from '@/components/LanguageToggle'
 
 export function RecoverPasswordPage() {
-  const tc = useT('common')
   const t = useT('auth')
-  const { resetPassword } = useAuth()
+  const tc = useT('common')
+  const { resetPassword, user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [newPassword, setNewPassword] = useState('')
-  const [isRecovery, setIsRecovery] = useState(false)
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isRecovery, setIsRecovery] = useState(() => (typeof window !== 'undefined' ? isPasswordRecovery() : false))
   const [updating, setUpdating] = useState(false)
 
   useEffect(() => {
-    const hash = window.location.hash
-    const search = window.location.search
-    if (hash.includes('type=recovery') || hash.includes('PASSWORD_RECOVERY') || search.includes('type=recovery')) {
+    if (isPasswordRecovery()) {
+      markPasswordRecovery()
       setIsRecovery(true)
     }
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') setIsRecovery(true)
+      if (event === 'PASSWORD_RECOVERY') {
+        markPasswordRecovery()
+        setIsRecovery(true)
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -41,7 +45,7 @@ export function RecoverPasswordPage() {
     setLoading(true)
     const { error } = await resetPassword(email)
     if (error) {
-      setError(t('recoverSendError'))
+      setError(t(resetPasswordErrorKey(error)))
       setLoading(false)
     } else {
       setSent(true)
@@ -56,14 +60,20 @@ export function RecoverPasswordPage() {
       setError(tc('passwordMin8'))
       return
     }
+    if (newPassword !== confirmPassword) {
+      setError(t('passwordsDiffer'))
+      return
+    }
     setUpdating(true)
     const { error } = await supabase.auth.updateUser({ password: newPassword })
     if (error) {
       setError(t('updateError'))
       setUpdating(false)
-    } else {
-      navigate('/app')
+      return
     }
+    clearPasswordRecovery()
+    await supabase.auth.signOut()
+    navigate('/login', { replace: true, state: { passwordUpdated: true } })
   }
 
   return (
@@ -85,6 +95,25 @@ export function RecoverPasswordPage() {
 
         <div className="luxury-card p-8">
           {isRecovery ? (
+            authLoading ? (
+            <>
+              <div className="mb-6">
+                <h2 className="text-xl font-serif font-medium">{t('validatingTitle')}</h2>
+                <p className="text-sm text-[var(--ink-500)] mt-1">{t('validatingText')}</p>
+              </div>
+              <div className="flex justify-center py-6"><Spinner className="size-6 text-[var(--gold)]" /></div>
+            </>
+            ) : !user ? (
+            <>
+              <div className="mb-6">
+                <h2 className="text-xl font-serif font-medium">{t('invalidLinkTitle')}</h2>
+                <p className="text-sm text-[var(--ink-500)] mt-1">{t('invalidLinkText')}</p>
+              </div>
+              <Button type="button" className="w-full h-11 btn-gold" onClick={() => { clearPasswordRecovery(); setIsRecovery(false) }}>
+                {t('requestNewLink')}
+              </Button>
+            </>
+            ) : (
             <>
               <div className="mb-6">
                 <h2 className="text-xl font-serif font-medium">{t('newPasswordTitle')}</h2>
@@ -93,7 +122,11 @@ export function RecoverPasswordPage() {
               <form onSubmit={handleUpdate} className="space-y-5">
                 <div className="space-y-1.5">
                   <Label className="text-sm">{t('newPassword')}</Label>
-                  <Input type="password" placeholder={tc('min8')} value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="h-11" />
+                  <Input type="password" placeholder={tc('min8')} value={newPassword} onChange={e => setNewPassword(e.target.value)} required className="h-11" autoComplete="new-password" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm">{t('confirmPassword')}</Label>
+                  <Input type="password" placeholder={t('confirmPasswordPh')} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required className="h-11" autoComplete="new-password" />
                 </div>
                 {error && <p className="text-sm text-[var(--danger)] bg-[var(--danger-50)] border border-[var(--danger-100)] rounded-lg px-3 py-2">{error}</p>}
                 <Button type="submit" className="w-full h-11 btn-gold" disabled={updating}>
@@ -102,6 +135,7 @@ export function RecoverPasswordPage() {
                 </Button>
               </form>
             </>
+            )
           ) : sent ? (
             <div className="text-center py-4">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[var(--success-50)] border border-[var(--success-100)] mb-4">
@@ -122,7 +156,7 @@ export function RecoverPasswordPage() {
               <form onSubmit={handleRequest} className="space-y-5">
                 <div className="space-y-1.5">
                   <Label className="text-sm">{tc('email')}</Label>
-                  <Input type="email" placeholder={tc('emailPlaceholder')} value={email} onChange={e => setEmail(e.target.value)} required className="h-11" />
+                  <Input type="email" placeholder={tc('emailPlaceholder')} value={email} onChange={e => setEmail(e.target.value)} required className="h-11" autoComplete="email" />
                 </div>
                 {error && <p className="text-sm text-[var(--danger)] bg-[var(--danger-50)] border border-[var(--danger-100)] rounded-lg px-3 py-2">{error}</p>}
                 <Button type="submit" className="w-full h-11 btn-gold" disabled={loading}>

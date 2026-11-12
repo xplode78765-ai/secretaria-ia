@@ -31,6 +31,10 @@ export default defineTexts({
   price: 'Valor (R$)',
   pricePh: '0,00',
   notesPh: 'Anotações...',
+  alertNew: 'Novo agendamento (agenda)',
+  alertCancelled: 'Cancelamento (agenda)',
+  alertChanged: 'Horário alterado (agenda)',
+  alertDefaultTitle: 'Agendamento',
 }, {
   title: 'Agenda',
   subtitle: 'Gestiona tus citas',
@@ -62,4 +66,8 @@ export default defineTexts({
   price: 'Valor (R$)',
   pricePh: '0,00',
   notesPh: 'Notas...',
+  alertNew: 'Nueva cita (agenda)',
+  alertCancelled: 'Cancelación (agenda)',
+  alertChanged: 'Horario modificado (agenda)',
+  alertDefaultTitle: 'Cita',
 })

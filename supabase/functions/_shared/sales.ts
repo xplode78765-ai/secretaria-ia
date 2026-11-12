@@ -81,6 +81,40 @@ export async function notifyWaitlist(supabase: Sb, opts: {
   return sent;
 }
 
+/**
+ * Sends a system message to a client and records it in the conversation as the
+ * assistant BEFORE sending, so the WhatsApp echo (fromMe) is recognised as ours
+ * and does not pause the AI. Creates the conversation when there is none.
+ */
+export async function sendSystemMessageToClient(supabase: Sb, opts: {
+  studioId: string; clientId: string; number: string; text: string; type: string;
+}): Promise<boolean> {
+  const { data: conn } = await supabase.from("evolution_api_connections")
+    .select("instance_name").eq("studio_id", opts.studioId).eq("status", "connected").maybeSingle();
+  const evo = await getEvolutionConfig(supabase);
+  if (!conn?.instance_name || !evo || !opts.number) return false;
+  let convId: string | null = null;
+  const { data: convs } = await supabase.from("conversations").select("id").eq("studio_id", opts.studioId).eq("client_id", opts.clientId).limit(1);
+  convId = convs?.[0]?.id ?? null;
+  if (!convId) {
+    const created = await supabase.from("conversations")
+      .insert({ studio_id: opts.studioId, client_id: opts.clientId, channel: "whatsapp", status: "active", ai_enabled: true, ai_state: {} })
+      .select("id").single();
+    convId = created.data?.id ?? null;
+    if (!convId) {
+      const retry = await supabase.from("conversations").select("id").eq("studio_id", opts.studioId).eq("client_id", opts.clientId).limit(1);
+      convId = retry.data?.[0]?.id ?? null;
+    }
+  }
+  const { data: saved } = convId
+    ? await supabase.from("messages").insert({ conversation_id: convId, sender_type: "ai", content: opts.text, message_type: "text", status: "pending", metadata: { type: opts.type } }).select("id").single()
+    : { data: null };
+  const res = await sendEvolutionText(evo, conn.instance_name, opts.number, opts.text);
+  if (saved?.id) await supabase.from("messages").update({ status: res.ok ? "sent" : "failed" }).eq("id", saved.id);
+  if (convId && res.ok) await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", convId);
+  return res.ok;
+}
+
 export type StudioPlanInfo = { status: string; aiMonthlyLimit: number | null; features: string[] };
 
 /** Subscription state and plan limits of a studio. */

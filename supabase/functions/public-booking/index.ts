@@ -3,6 +3,7 @@ import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
 import { formatZoned, normalizePhone, parseNaiveInZone, phoneLookupValues, zonedYmd, safeTz } from "../_shared/brazil.ts";
 import { notifyStudioStaff } from "../_shared/staff-alert.ts";
 import { msg, safeLocale } from "../_shared/messages.ts";
+import { sendSystemMessageToClient } from "../_shared/sales.ts";
 import { describeDay, describeWeek, isWithinBusinessHours, normalizeBusinessHours } from "../_shared/hours.ts";
 
 
@@ -192,6 +193,14 @@ Deno.serve(async (req: Request) => {
       studio.id,
       msg(L, "staffNewPublic", { client: name, title, when: formatZoned(start, tz) }),
     );
+    // Tell the client the request arrived (when the studio WhatsApp is connected).
+    void sendSystemMessageToClient(supabase, {
+      studioId: studio.id,
+      clientId: client.id,
+      number: phone,
+      text: msg(L, "publicReceived", { title, when: formatZoned(start, tz) }),
+      type: "public_booking_received",
+    }).catch(() => false);
 
     return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

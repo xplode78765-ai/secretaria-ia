@@ -3,6 +3,7 @@ import { DEFAULT_ORIGIN, originAllowed } from "../_shared/cors.ts";
 import { getEvolutionConfig, sendEvolutionText } from "../_shared/evolution.ts";
 import { formatZoned, safeTz } from "../_shared/brazil.ts";
 import { msg, safeLocale } from "../_shared/messages.ts";
+import { notifyStudioStaff } from "../_shared/staff-alert.ts";
 
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -55,12 +56,23 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "No studio found" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    const body = await req.json();
+
+    // Alert to the studio's own staff number (used when someone saves in the Agenda).
+    // Any member of the studio may trigger it; the text only goes to the studio's number.
+    if (body.action === "staff_alert") {
+      const text = String(body.text || "").trim().slice(0, 500);
+      if (text.length < 3) {
+        return new Response(JSON.stringify({ error: "Texto curto demais" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      const ok = await notifyStudioStaff(supabase, userData.studio_id, text);
+      return new Response(JSON.stringify({ ok }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // The WhatsApp inbox is for staff only (owner/admin/reception), same as the RLS policies.
     if (!["owner", "admin", "reception"].includes(String(userData.role || ""))) {
       return new Response(JSON.stringify({ error: "Sem permissão para enviar mensagens" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
-    const body = await req.json();
 
     // The owner approved a booking made by the AI (approval mode): tell the client.
     // Sent as the assistant, so it does not pause the AI in that conversation.

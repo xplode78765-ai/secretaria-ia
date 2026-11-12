@@ -3,6 +3,7 @@ import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { UserProfile } from '@/lib/supabase'
 import { translate, useI18n } from '@/i18n'
+import { markPasswordRecovery } from '@/lib/auth-nav'
 
 type AuthContextType = {
   user: User | null
@@ -13,7 +14,7 @@ type AuthContextType = {
   signUp: (email: string, password: string, studioName: string, userName: string) => Promise<{ error: string | null; needsEmailConfirmation?: boolean; profile: UserProfile | null }>
   signOut: () => Promise<void>
   resetPassword: (email: string) => Promise<{ error: string | null }>
-  refreshProfile: () => Promise<UserProfile | null>
+  refreshProfile: (uid?: string) => Promise<UserProfile | null>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -57,7 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!session) setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') markPasswordRecovery()
       setSession(session)
       setUser(session?.user ?? null)
       if (!session) {
@@ -126,7 +128,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { studio_name: studioName, user_name: userName, full_name: userName } },
+        options: {
+          emailRedirectTo: `${window.location.origin}/login`,
+          data: { studio_name: studioName, user_name: userName, full_name: userName },
+        },
       })
       if (error) return { error: error.message, profile: null }
       if (!data.user) return { error: translate(lang, 'auth', 'signupFailed'), profile: null }
@@ -165,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, profile, loading, signIn, signUp, signOut, resetPassword, refreshProfile: () => loadProfile() }}>
+    <AuthContext.Provider value={{ user, session, profile, loading, signIn, signUp, signOut, resetPassword, refreshProfile: loadProfile }}>
       {children}
     </AuthContext.Provider>
   )

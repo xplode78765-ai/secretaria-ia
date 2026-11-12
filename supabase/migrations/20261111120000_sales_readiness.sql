@@ -176,6 +176,7 @@ DECLARE
   v_tz text;
   v_hours jsonb;
   v_configured boolean;
+  v_legacy boolean; -- older format: { open, close, weekdays: [...] }
   v_replies int;
   v_after_hours int;
   v_bookings int;
@@ -191,6 +192,7 @@ BEGIN
   SELECT timezone, coalesce(business_hours, '{}'::jsonb) INTO v_tz, v_hours FROM public.studios WHERE id = p_studio;
   IF v_tz IS NULL THEN RETURN '{}'::jsonb; END IF;
   v_configured := v_hours ?| ARRAY['0', '1', '2', '3', '4', '5', '6'];
+  v_legacy := jsonb_typeof(v_hours -> 'weekdays') = 'array';
 
   WITH ai AS (
     SELECT m.created_at AT TIME ZONE v_tz AS local_at
@@ -202,6 +204,10 @@ BEGIN
   ), marked AS (
     SELECT local_at,
       CASE
+        WHEN v_legacy THEN
+          (v_hours -> 'weekdays') @> to_jsonb(extract(dow FROM local_at)::int)
+          AND local_at::time >= coalesce(v_hours ->> 'open', '09:00')::time
+          AND local_at::time < coalesce(v_hours ->> 'close', '19:00')::time
         WHEN NOT v_configured THEN
           extract(dow FROM local_at) <> 0 AND local_at::time >= time '09:00' AND local_at::time < time '19:00'
         ELSE
