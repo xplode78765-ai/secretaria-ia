@@ -124,11 +124,14 @@ Por isso: funções primeiro.
 
 ## Etapa 6 — Configurações novas
 
-- [ ] **SQL Editor** — endereço do projeto (para o cron dos lembretes) e do app (CORS):
+- [ ] **SQL Editor** — endereço do app (CORS):
   ```sql
-  update public.app_secrets set value = 'https://SEU_PROJECT_REF.supabase.co' where key = 'supabase_url';
   update public.app_secrets set value = 'https://ENDERECO-DO-SEU-APP' where key = 'allowed_origin';
   ```
+  **Não preencha `supabase_url`** no projeto de produção (`rprndjrdjuxdkliwasje`): lá já existe
+  um agendador (`appointment-reminders`, a cada 15 min) chamando a função de lembretes.
+  Preencher `supabase_url` liga um segundo agendador (`appointment-reminders-hourly`) e os
+  dois passariam a disparar. Só preencha num projeto novo, que não tenha o agendador antigo.
   `allowed_origin` aceita vários, separados por vírgula
   (ex.: `https://app.meustudio.com.br,https://meustudio.netlify.app`).
   Enquanto estiver vazio, as funções continuam aceitando qualquer `*.netlify.app` / Bolt.
